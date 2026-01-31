@@ -24,6 +24,7 @@ use symbols::{
 
 use types::{
     Span,
+    Value,
     ValueAndSpan,
 };
 
@@ -48,7 +49,10 @@ impl<T> Spanned<T> {
 /// acceptable values, thereby removing `{Entity,Value}Place` from consideration.
 pub trait TransactableValueMarker {}
 
-/// `ValueAndSpan` is the value type coming out of the entity parser.
+/// `Value` is the plain EDN value type that can be used with Spanned<Entity<Value>>.
+impl TransactableValueMarker for Value {}
+
+/// `ValueAndSpan` is the value type coming out of the entity parser (legacy).
 impl TransactableValueMarker for ValueAndSpan {}
 
 /// A tempid, either an external tempid given in a transaction (usually as an `Value::Text`),
