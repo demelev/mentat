@@ -23,8 +23,24 @@ use symbols::{
 };
 
 use types::{
+    Span,
+    Value,
     ValueAndSpan,
 };
+
+/// A generic wrapper that attaches span (source location) information to a value.
+/// This allows tracking the origin of parsed values through the transaction pipeline.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
+pub struct Spanned<T> {
+    pub inner: T,
+    pub span: Span,
+}
+
+impl<T> Spanned<T> {
+    pub fn new(inner: T, span: Span) -> Self {
+        Spanned { inner, span }
+    }
+}
 
 /// `EntityPlace` and `ValuePlace` embed values, either directly (i.e., `ValuePlace::Atom`) or
 /// indirectly (i.e., `EntityPlace::LookupRef`).  In order to maintain the graph of `Into` and
@@ -33,7 +49,10 @@ use types::{
 /// acceptable values, thereby removing `{Entity,Value}Place` from consideration.
 pub trait TransactableValueMarker {}
 
-/// `ValueAndSpan` is the value type coming out of the entity parser.
+/// `Value` is the plain EDN value type that can be used with Spanned<Entity<Value>>.
+impl TransactableValueMarker for Value {}
+
+/// `ValueAndSpan` is the value type coming out of the entity parser (legacy).
 impl TransactableValueMarker for ValueAndSpan {}
 
 /// A tempid, either an external tempid given in a transaction (usually as an `Value::Text`),
