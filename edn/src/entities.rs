@@ -23,8 +23,23 @@ use symbols::{
 };
 
 use types::{
+    Span,
     ValueAndSpan,
 };
+
+/// A generic wrapper that attaches span (source location) information to a value.
+/// This allows tracking the origin of parsed values through the transaction pipeline.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
+pub struct Spanned<T> {
+    pub inner: T,
+    pub span: Span,
+}
+
+impl<T> Spanned<T> {
+    pub fn new(inner: T, span: Span) -> Self {
+        Spanned { inner, span }
+    }
+}
 
 /// `EntityPlace` and `ValuePlace` embed values, either directly (i.e., `ValuePlace::Atom`) or
 /// indirectly (i.e., `EntityPlace::LookupRef`).  In order to maintain the graph of `Into` and
