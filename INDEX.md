@@ -1,9 +1,11 @@
 # Entity Architecture Exploration - Index
 
-This PR explores two fundamental architectural questions about the `Entity` type in the Mentat database system.
+This PR explores **three** fundamental architectural questions about the `Entity` type in the Mentat database system.
 
 ## 🎯 Quick Navigation
 
+- **Want executive summary?** → Read `FINAL_SUMMARY.md` ⭐
+- **Want to compare all approaches?** → Read `THREE_APPROACHES_COMPARISON.md`
 - **Want a quick overview?** → Read `EXPLORATION_README.md`
 - **Want visual diagrams?** → Read `ARCHITECTURE_VISUAL.md`
 - **Want detailed analysis?** → Read specific documents below
@@ -14,7 +16,9 @@ This PR explores two fundamental architectural questions about the `Entity` type
 
 | Document | Purpose | Audience |
 |----------|---------|----------|
-| **EXPLORATION_README.md** | 5-minute overview of entire exploration | Everyone |
+| **FINAL_SUMMARY.md** | ⭐ Complete summary of all 3 questions | Start here! |
+| **THREE_APPROACHES_COMPARISON.md** | Side-by-side comparison table | Decision makers |
+| **EXPLORATION_README.md** | 5-minute overview | Everyone |
 | **ARCHITECTURE_VISUAL.md** | Visual diagrams and comparisons | Visual learners |
 
 ### Question 1: Generic Parameter
@@ -32,6 +36,13 @@ This PR explores two fundamental architectural questions about the `Entity` type
 |----------|---------|
 | **SPANNED_WRAPPER_SUMMARY.md** | Quick summary and benefits |
 | **ENTITY_SPANNED_ARCHITECTURE.md** | Complete architectural analysis |
+
+### Question 3: Split Types (Parser::Entity)
+
+| Document | Purpose |
+|----------|---------|
+| **PARSER_ENTITY_ANALYSIS.md** | Architecture analysis and issues |
+| **CODE_DUPLICATION_ANALYSIS.md** | Code duplication metrics |
 
 ## 🔍 Questions Explored
 
@@ -58,18 +69,38 @@ This PR explores two fundamental architectural questions about the `Entity` type
 **Key Points**:
 - Current: `Entity<ValueAndSpan>` with nested spans
 - Proposed: `Spanned<Entity<Value>>` with single span
-- Spans never used in transaction processing
+- Spans never used in transaction processing (verified!)
+- 90% reduction in span storage
 - Simpler structure, same functionality
 
 **Documents**: SPANNED_WRAPPER_SUMMARY.md, ENTITY_SPANNED_ARCHITECTURE.md, ARCHITECTURE_VISUAL.md
 
+### Q3: Split Types (NEW)
+
+> "What if use in edn parser not Entity but Parser::Entity and then convert it to enum Entity which uses inside TypedValue type, without generic types?"
+
+**Answer**: ❌ Do NOT implement - creates massive problems
+
+**Key Points**:
+- Would require 2 separate Entity definitions (parser + core)
+- 6x more code (300+ LOC vs 50 LOC)
+- Massive code duplication
+- Update 3-5 places for any change
+- Import confusion
+- Zero benefits
+
+**Documents**: PARSER_ENTITY_ANALYSIS.md, CODE_DUPLICATION_ANALYSIS.md
+
 ## ✅ Deliverables
 
-### Documentation (7 files)
+### Documentation (13 files!)
+- [x] Complete summary and comparison
 - [x] Overview and index
 - [x] Visual architecture guide
-- [x] Generic parameter analysis (3 docs)
-- [x] Spanned wrapper analysis (2 docs)
+- [x] Generic parameter analysis (4 docs)
+- [x] Spanned wrapper analysis (3 docs)
+- [x] Split types analysis (2 docs)
+- [x] Comparison documents (2 docs)
 
 ### Code Changes
 - [x] Added `Spanned<T>` wrapper type
@@ -77,6 +108,14 @@ This PR explores two fundamental architectural questions about the `Entity` type
 - [x] All changes in `edn/src/entities.rs`
 
 ## 📊 Key Findings
+
+### Comparison Table
+
+| Approach | LOC | Duplication | Maintenance | Verdict |
+|----------|-----|-------------|-------------|---------|
+| **Generic Entity<V>** | 50 | None | Easy | ✅ Keep |
+| **Spanned wrapper** | 60 | None | Easy | ✅ Add |
+| **Split types** | 300+ | Massive | Hard | ❌ Reject |
 
 ### Generic Parameter
 
