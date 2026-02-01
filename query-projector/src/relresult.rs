@@ -31,7 +31,7 @@ use core_traits::{
 ///   a reference.
 /// - By consuming the results using `into_iter`. This allocates short-lived vectors,
 ///   but gives you ownership of the enclosed `TypedValue`s.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelResult<T> {
     pub width: usize,
     pub values: Vec<T>,

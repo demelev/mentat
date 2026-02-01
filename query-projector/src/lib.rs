@@ -12,6 +12,8 @@ extern crate failure;
 
 extern crate indexmap;
 extern crate rusqlite;
+#[macro_use]
+extern crate serde_derive;
 
 extern crate edn;
 extern crate mentat_core;
@@ -125,7 +127,7 @@ pub struct QueryOutput {
     pub results: QueryResults,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QueryResults {
     Scalar(Option<Binding>),
     Tuple(Option<Vec<Binding>>),

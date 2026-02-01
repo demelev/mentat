@@ -8,7 +8,9 @@ sqlcipher = ["rusqlite/sqlcipher"]
 
 [dependencies]
 failure = "0.1.1"
-indexmap = "1"
+indexmap = { version = "1", features = ["serde-1"] }
+serde = "1.0"
+serde_derive = "1.0"
 
 [dependencies.rusqlite]
 version = "0.13"
@@ -46,3 +48,6 @@ path = "../query-sql"
 
 [dev-dependencies.mentat_sql]
 path = "../sql"
+
+[dev-dependencies]
+serde_json = "1.0"
