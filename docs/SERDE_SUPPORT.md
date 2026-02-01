@@ -81,7 +81,7 @@ Note that JSON does not support non-string keys in maps. If you have `Structured
 Example with bincode:
 
 ```rust
-use core_traits::StructuredMap;
+use core_traits::{StructuredMap, TypedValue};
 use edn::Keyword;
 
 let mut map = StructuredMap::default();
