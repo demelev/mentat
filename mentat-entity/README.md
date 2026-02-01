@@ -192,7 +192,6 @@ This implementation follows these principles:
 
 Current limitations:
 
-- Reading entities requires implementation (marked as `todo!()` in current version)
 - Query builder for complex queries not yet implemented
 - No support for derived attributes
 - No support for transaction functions

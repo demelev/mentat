@@ -170,13 +170,16 @@ impl EntitySchema {
             );
             
             // Add uniqueness constraint if specified
-            if field.unique != Unique::None {
-                let unique_val = match field.unique {
-                    Unique::Value => ":db.unique/value",
-                    Unique::Identity => ":db.unique/identity",
-                    Unique::None => unreachable!(),
-                };
-                attr_def.push_str(&format!("\n [:db/add \"{}\" :db/unique {}]", field.name, unique_val));
+            match field.unique {
+                Unique::Value => {
+                    attr_def.push_str(&format!("\n [:db/add \"{}\" :db/unique :db.unique/value]", field.name));
+                }
+                Unique::Identity => {
+                    attr_def.push_str(&format!("\n [:db/add \"{}\" :db/unique :db.unique/identity]", field.name));
+                }
+                Unique::None => {
+                    // No uniqueness constraint
+                }
             }
             
             // Add index if specified
