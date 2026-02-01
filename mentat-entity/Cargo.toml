@@ -1,0 +1,20 @@
+[package]
+name = "mentat-entity"
+version = "0.1.0"
+authors = ["Mentat Contributors"]
+
+[dependencies]
+edn = { path = "../edn" }
+core_traits = { path = "../core-traits" }
+mentat_core = { path = "../core" }
+mentat_db = { path = "../db" }
+db_traits = { path = "../db-traits" }
+mentat_transaction = { path = "../transaction" }
+public_traits = { path = "../public-traits" }
+mentat-entity-derive = { path = "../mentat-entity-derive" }
+failure = "0.1.1"
+chrono = "0.4"
+uuid = { version = "0.5", features = ["v4", "serde"] }
+
+[features]
+default = []
