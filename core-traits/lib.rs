@@ -722,7 +722,7 @@ impl MicrosecondPrecision for DateTime<Utc> {
 /// would also serve that purpose.
 ///
 /// Note that maps are not ordered, and so `Binding` is neither `Ord` nor `PartialOrd`.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Binding {
     Scalar(TypedValue),
     Vec(ValueRc<Vec<Binding>>),
@@ -801,7 +801,7 @@ impl Binding {
 ///
 /// We entirely support the former, and partially support the latter -- you can alias
 /// using a different keyword only.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StructuredMap(pub IndexMap<ValueRc<Keyword>, Binding>);
 
 impl Deref for StructuredMap {

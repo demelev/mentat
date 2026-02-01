@@ -11,7 +11,7 @@ path = "lib.rs"
 chrono = { version = "0.4", features = ["serde"] }
 enum-set = "0.0.7"
 lazy_static = "0.2"
-indexmap = "1"
+indexmap = { version = "1", features = ["serde-1"] }
 ordered-float = { version = "0.5", features = ["serde"] }
 uuid = { version = "0.5", features = ["v4", "serde"] }
 serde = { version = "1.0", features = ["rc"] }
@@ -20,3 +20,6 @@ serde_derive = "1.0"
 [dependencies.edn]
 path = "../edn"
 features = ["serde_support"]
+
+[dev-dependencies]
+serde_json = "1.0"
