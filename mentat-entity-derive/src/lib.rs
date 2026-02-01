@@ -103,15 +103,16 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
         
         // to_values implementation
         let keyword = quote! { mentat_core::Keyword::namespaced(#namespace, #field_name_str) };
-        let to_typed_value = generate_to_typed_value(&field_type, quote! { self.#field_name });
         
         if is_optional {
+            let to_typed_value_inner = generate_to_typed_value(&field_type, quote! { val });
             to_values_fields.push(quote! {
                 if let Some(ref val) = self.#field_name {
-                    values.insert(#keyword, #to_typed_value.replace("self.#field_name", "val"));
+                    values.insert(#keyword, #to_typed_value_inner);
                 }
             });
         } else {
+            let to_typed_value = generate_to_typed_value(&field_type, quote! { self.#field_name });
             to_values_fields.push(quote! {
                 values.insert(#keyword, #to_typed_value);
             });
@@ -135,19 +136,19 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
         }
         
         // write fields - similar to to_values but for EntityBuilder
-        let entity_add = if is_optional {
-            quote! {
+        if is_optional {
+            let to_typed_value_inner = generate_to_typed_value(&field_type, quote! { val });
+            write_fields.push(quote! {
                 if let Some(ref val) = self.#field_name {
-                    let typed_val = #to_typed_value.replace("self.#field_name", "val");
-                    builder.add(entity.clone(), #keyword, typed_val)?;
+                    builder.add(entity.clone(), #keyword, #to_typed_value_inner)?;
                 }
-            }
+            });
         } else {
-            quote! {
+            let to_typed_value = generate_to_typed_value(&field_type, quote! { self.#field_name });
+            write_fields.push(quote! {
                 builder.add(entity.clone(), #keyword, #to_typed_value)?;
-            }
-        };
-        write_fields.push(entity_add);
+            });
+        }
     }
     
     // Generate the implementation
