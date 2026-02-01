@@ -224,24 +224,12 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
             fn read<'a, 'c>(in_progress: &mentat_transaction::InProgress<'a, 'c>, entid: core_traits::Entid) 
                 -> public_traits::errors::Result<Self> 
             {
-                use mentat_transaction::query::InProgressRead;
-                
-                // Build a query to pull all attributes for this entity
+                // Get the schema and read all attributes
                 let schema = Self::schema();
-                let attr_names: Vec<String> = schema.fields.iter()
-                    .map(|f| format!(":{}:{}", #namespace, f.name))
-                    .collect();
+                let values = mentat_entity::read_entity_attributes(in_progress, entid, &schema)?;
                 
-                let pull_expr = format!("[:db/id {}]", attr_names.join(" "));
-                let query = format!("[:find (pull ?e {}) :in $ ?e :where [?e :db/id]]", pull_expr);
-                
-                let results = in_progress.q_once(&query, core_traits::QueryInputs::with_value_sequence(vec![
-                    (edn::query::Variable::from_valid_name("?e"), core_traits::TypedValue::Ref(entid))
-                ]))?;
-                
-                // Extract values from query results and construct entity
-                // This is simplified - actual implementation would need to parse pull results
-                todo!("Implement read using pull query or direct datom queries")
+                // Convert to entity using from_values
+                Self::from_values(values)
             }
             
             fn read_by_unique<'a, 'c>(
@@ -249,8 +237,12 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
                 attribute: &mentat_core::Keyword,
                 value: core_traits::TypedValue,
             ) -> public_traits::errors::Result<Self> {
-                // Query for entity with unique attribute
-                todo!("Implement read_by_unique")
+                // Find entity by unique attribute
+                let entid = mentat_entity::find_entity_by_unique(in_progress, attribute, value)?
+                    .ok_or_else(|| failure::err_msg("Entity not found"))?;
+                
+                // Read the entity
+                Self::read(in_progress, entid)
             }
         }
     };

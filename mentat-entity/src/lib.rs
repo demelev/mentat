@@ -49,6 +49,9 @@ extern crate uuid;
 
 pub use mentat_entity_derive::Entity;
 
+mod read;
+pub use read::{read_entity_attributes, find_entity_by_unique};
+
 use std::collections::HashMap;
 
 use core_traits::{
