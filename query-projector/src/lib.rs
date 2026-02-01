@@ -14,6 +14,7 @@ extern crate indexmap;
 extern crate rusqlite;
 #[macro_use]
 extern crate serde_derive;
+extern crate serde_json;
 
 extern crate edn;
 extern crate mentat_core;
@@ -85,6 +86,7 @@ mod project;
 mod projectors;
 mod pull;
 mod relresult;
+pub mod deserialize;
 
 use project::{
     ProjectedElements,
