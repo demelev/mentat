@@ -2,6 +2,7 @@
 name = "mentat-entity"
 version = "0.1.0"
 authors = ["Mentat Contributors"]
+edition = "2018"
 
 [dependencies]
 edn = { path = "../edn" }

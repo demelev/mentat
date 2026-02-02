@@ -10,10 +10,6 @@
 
 //! Procedural macro for deriving the Entity trait
 
-extern crate proc_macro;
-extern crate syn;
-extern crate quote;
-
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
