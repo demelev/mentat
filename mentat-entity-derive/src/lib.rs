@@ -11,6 +11,8 @@
 //! Procedural macro for deriving the Entity trait
 
 extern crate proc_macro;
+extern crate syn;
+extern crate quote;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -73,7 +75,6 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
         let (field_type, is_optional) = extract_field_type(&field.ty);
         let field_type_enum = rust_type_to_field_type(&field_type);
         
-        let ident_name = format!("{}:{}", namespace, field_name_str);
         let unique_variant = match field_attrs.unique.as_deref() {
             Some("identity") => quote! { mentat_entity::Unique::Identity },
             Some("value") => quote! { mentat_entity::Unique::Value },
