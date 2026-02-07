@@ -292,13 +292,13 @@ fn run_statement<'sqlite, 'stmt, 'bound>
  bindings: &'bound [(String, Rc<rusqlite::types::Value>)]) -> Result<rusqlite::Rows<'stmt>> {
 
     let rows = if bindings.is_empty() {
-        statement.query(&[])?
+        statement.query(())?
     } else {
-        let refs: Vec<(&str, &ToSql)> =
+        let refs: Vec<(&str, &dyn ToSql)> =
             bindings.iter()
-                    .map(|&(ref k, ref v)| (k.as_str(), v.as_ref() as &ToSql))
+                    .map(|&(ref k, ref v)| (k.as_str(), v.as_ref() as &dyn ToSql))
                     .collect();
-        statement.query_named(&refs)?
+        statement.query(rusqlite::params_from_iter(refs.iter().map(|(_, v)| *v)))?
     };
     Ok(rows)
 }
@@ -313,8 +313,8 @@ fn run_sql_query<'sqlite, 'sql, 'bound, T, F>
     let mut statement = sqlite.prepare(sql)?;
     let mut rows = run_statement(&mut statement, &bindings)?;
     let mut result = vec![];
-    while let Some(row_or_error) = rows.next() {
-        result.push(mapper(&row_or_error?));
+    while let Some(row) = rows.next()? {
+        result.push(mapper(row));
     }
     Ok(result)
 }
@@ -453,10 +453,10 @@ pub fn q_explain<'sqlite, 'query, T>
 
             let steps = run_sql_query(sqlite, &plan_sql, &query.args, |row| {
                 QueryPlanStep {
-                    select_id: row.get(0),
-                    order: row.get(1),
-                    from: row.get(2),
-                    detail: row.get(3)
+                    select_id: row.get(0).unwrap(),
+                    order: row.get(1).unwrap(),
+                    from: row.get(2).unwrap(),
+                    detail: row.get(3).unwrap()
                 }
             })?;
 

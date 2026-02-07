@@ -12,34 +12,19 @@
 
 use std::collections::HashMap;
 
-use core_traits::{
-    Binding,
-    Entid,
-    TypedValue,
-};
+use core_traits::{Entid, TypedValue};
 
-use mentat_core::{
-    Keyword,
-    Schema,
-};
+use mentat_core::Keyword;
 
-use mentat_transaction::{
-    InProgress,
-    query::{
-        InProgressRead,
-        QueryInputs,
-        QueryResults,
-    },
-};
+use mentat_transaction::{InProgress, Queryable};
 
-use edn::query::{
-    Variable,
-};
+use mentat_transaction::query::{QueryInputs, QueryResults};
 
-use public_traits::errors::{
-    MentatError,
-    Result,
-};
+use edn::query::Variable;
+
+use public_traits::errors::{MentatError, Result};
+
+use std::collections::BTreeMap;
 
 use super::EntitySchema;
 
@@ -51,22 +36,22 @@ pub fn read_entity_attributes<'a, 'c>(
     schema: &EntitySchema,
 ) -> Result<HashMap<Keyword, TypedValue>> {
     let mut results = HashMap::new();
-    
+
     // For each field in the schema, query the database
     for field in &schema.fields {
-        let query = format!(
-            "[:find ?v . :in $ ?e :where [?e :{} ?v]]",
-            field.ident
-        );
-        
-        let mut inputs = QueryInputs::new();
-        inputs = inputs.bind(Variable::from_valid_name("?e"), TypedValue::Ref(entid));
-        
-        match in_progress.q_once(&query, inputs) {
+        let query = format!("[:find ?v . :in ?e :where [?e {} ?v]]", field.ident);
+
+        let var = Variable::from_valid_name("?e");
+        let value = TypedValue::Ref(dbg!(entid));
+        let mut values = BTreeMap::new();
+        values.insert(var, value);
+        let inputs = QueryInputs::with_values(values);
+
+        match in_progress.q_once(&query, Some(inputs)) {
             Ok(query_output) => {
-                match query_output.results {
+                match dbg!(query_output.results) {
                     QueryResults::Scalar(Some(binding)) => {
-                        if let Some(typed_value) = binding.into_typed_value() {
+                        if let Some(typed_value) = binding.into_scalar() {
                             results.insert(field.ident.clone(), typed_value);
                         }
                     }
@@ -74,9 +59,10 @@ pub fn read_entity_attributes<'a, 'c>(
                         // Attribute not present, skip (will be handled as Option::None or error)
                     }
                     _ => {
-                        return Err(MentatError::UnexpectedResultsType(
-                            "Expected scalar result".to_string(),
-                        ).into());
+                        return Err(MentatError::UnknownAttribute(format!(
+                            "Expected scalar result for attribute {}",
+                            field.ident
+                        )));
                     }
                 }
             }
@@ -90,7 +76,7 @@ pub fn read_entity_attributes<'a, 'c>(
             }
         }
     }
-    
+
     Ok(results)
 }
 
@@ -100,34 +86,31 @@ pub fn find_entity_by_unique<'a, 'c>(
     attribute: &Keyword,
     value: TypedValue,
 ) -> Result<Option<Entid>> {
-    let query = format!(
-        "[:find ?e . :in $ ?v :where [?e :{} ?v]]",
-        attribute
-    );
-    
-    let mut inputs = QueryInputs::new();
-    inputs = inputs.bind(Variable::from_valid_name("?v"), value);
-    
-    match in_progress.q_once(&query, inputs) {
-        Ok(query_output) => {
-            match query_output.results {
-                QueryResults::Scalar(Some(binding)) => {
-                    if let Some(TypedValue::Ref(entid)) = binding.into_typed_value() {
-                        Ok(Some(entid))
-                    } else {
-                        Err(MentatError::UnexpectedResultsType(
-                            "Expected entid".to_string(),
-                        ).into())
-                    }
-                }
-                QueryResults::Scalar(None) => Ok(None),
-                _ => {
-                    Err(MentatError::UnexpectedResultsType(
-                        "Expected scalar result".to_string(),
-                    ).into())
+    let query = format!("[:find ?e :in ?v :where [?e :{} ?v]]", attribute);
+
+    let var = Variable::from_valid_name("?v");
+    let mut values = BTreeMap::new();
+    values.insert(var, value);
+    let inputs = QueryInputs::with_values(values);
+
+    match in_progress.q_once(&query, Some(inputs)) {
+        Ok(query_output) => match query_output.results {
+            QueryResults::Scalar(Some(binding)) => {
+                if let Some(TypedValue::Ref(entid)) = binding.into_scalar() {
+                    Ok(Some(entid))
+                } else {
+                    Err(MentatError::UnknownAttribute(format!(
+                        "Expected entid for attribute {}",
+                        attribute
+                    )))
                 }
             }
-        }
+            QueryResults::Scalar(None) => Ok(None),
+            _ => Err(MentatError::UnknownAttribute(format!(
+                "Expected scalar result for attribute {}",
+                attribute
+            ))),
+        },
         Err(e) => Err(e),
     }
 }

@@ -6,8 +6,8 @@ workspace = ".."
 [features]
 sqlcipher = ["rusqlite/sqlcipher"]
 
-[dependencies]
-failure = "0.1.1"
+[dependencies.thiserror]
+workspace = true
 
 [dependencies.edn]
 path = "../edn"
@@ -43,5 +43,5 @@ path = "../query-pull"
 path = "../query-sql"
 
 [dependencies.rusqlite]
-version = "0.13"
+workspace = true
 features = ["limits"]

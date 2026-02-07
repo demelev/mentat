@@ -75,7 +75,7 @@ fn test_entity_builder_bogus_entids() {
     // This should fail: unrecognized entid.
     match in_progress.transact_entities(terms).expect_err("expected transact to fail") {
         MentatError::DbError(e) => {
-            assert_eq!(e.kind(), db_traits::errors::DbErrorKind::UnrecognizedEntid(999));
+            assert_eq!(e, db_traits::errors::DbErrorKind::UnrecognizedEntid(999));
         },
         _ => panic!("Should have rejected the entid."),
     }

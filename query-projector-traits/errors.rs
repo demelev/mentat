@@ -10,82 +10,64 @@
 
 use std; // To refer to std::result::Result.
 
+use thiserror::Error;
+
 use rusqlite;
 
-use core_traits::{
-    ValueTypeSet,
-};
+use core_traits::ValueTypeSet;
 use db_traits::errors::DbError;
-use edn::query::{
-    PlainSymbol,
-};
-use query_pull_traits::errors::{
-    PullError,
-};
+use edn::query::PlainSymbol;
+use query_pull_traits::errors::PullError;
 
-use aggregates::{
-    SimpleAggregationOp,
-};
+use crate::aggregates::SimpleAggregationOp;
 
 pub type Result<T> = std::result::Result<T, ProjectorError>;
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum ProjectorError {
     /// We're just not done yet.  Message that the feature is recognized but not yet
     /// implemented.
-    #[fail(display = "not yet implemented: {}", _0)]
+    #[error("not yet implemented: {0}")]
     NotYetImplemented(String),
 
-    #[fail(display = "no possible types for value provided to {:?}", _0)]
+    #[error("no possible types for value provided to {0:?}")]
     CannotProjectImpossibleBinding(SimpleAggregationOp),
 
-    #[fail(display = "cannot apply projection operation {:?} to types {:?}", _0, _1)]
+    #[error("cannot apply projection operation {0:?} to types {1:?}")]
     CannotApplyAggregateOperationToTypes(SimpleAggregationOp, ValueTypeSet),
 
-    #[fail(display = "invalid projection: {}", _0)]
+    #[error("invalid projection: {0}")]
     InvalidProjection(String),
 
-    #[fail(display = "cannot project unbound variable {:?}", _0)]
+    #[error("cannot project unbound variable {0:?}")]
     UnboundVariable(PlainSymbol),
 
-    #[fail(display = "cannot find type for variable {:?}", _0)]
+    #[error("cannot find type for variable {0:?}")]
     NoTypeAvailableForVariable(PlainSymbol),
 
-    #[fail(display = "expected {}, got {}", _0, _1)]
+    #[error("expected {0}, got {1}")]
     UnexpectedResultsType(&'static str, &'static str),
 
-    #[fail(display = "expected tuple of length {}, got tuple of length {}", _0, _1)]
+    #[error("expected tuple of length {0}, got tuple of length {1}")]
     UnexpectedResultsTupleLength(usize, usize),
 
-    #[fail(display = "min/max expressions: {} (max 1), corresponding: {}", _0, _1)]
+    #[error("min/max expressions: {0} (max 1), corresponding: {1}")]
     AmbiguousAggregates(usize, usize),
 
     // It would be better to capture the underlying `rusqlite::Error`, but that type doesn't
     // implement many useful traits, including `Clone`, `Eq`, and `PartialEq`.
-    #[fail(display = "SQL error: {}", _0)]
+    #[error("SQL error: {0}")]
     RusqliteError(String),
 
-    #[fail(display = "{}", _0)]
-    DbError(#[cause] DbError),
+    #[error(transparent)]
+    DbError(#[from] DbError),
 
-    #[fail(display = "{}", _0)]
-    PullError(#[cause] PullError),
+    #[error(transparent)]
+    PullError(#[from] PullError),
 }
 
 impl From<rusqlite::Error> for ProjectorError {
     fn from(error: rusqlite::Error) -> ProjectorError {
         ProjectorError::RusqliteError(error.to_string())
-    }
-}
-
-impl From<DbError> for ProjectorError {
-    fn from(error: DbError) -> ProjectorError {
-        ProjectorError::DbError(error)
-    }
-}
-
-impl From<PullError> for ProjectorError {
-    fn from(error: PullError) -> ProjectorError {
-        ProjectorError::PullError(error)
     }
 }

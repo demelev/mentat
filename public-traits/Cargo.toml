@@ -2,6 +2,7 @@
 name = "public_traits"
 version = "0.0.1"
 workspace = ".."
+edition = "2024"
 
 [lib]
 name = "public_traits"
@@ -10,15 +11,20 @@ path = "lib.rs"
 [features]
 default = ["syncable"]
 sqlcipher = ["rusqlite/sqlcipher"]
-syncable = ["tolstoy_traits", "hyper", "serde_json"]
+syncable = [
+    "tolstoy_traits",
+    "hyper",
+    "serde_json",
+]
 
 [dependencies]
-failure = "0.1.1"
-failure_derive = "0.1.1"
 uuid = "0.5"
 
+[dependencies.thiserror]
+workspace = true
+
 [dependencies.rusqlite]
-version = "0.13"
+workspace = true
 features = ["limits"]
 
 [dependencies.edn]

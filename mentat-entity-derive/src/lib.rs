@@ -13,8 +13,8 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    parse_macro_input, DeriveInput, Data, Fields, Meta, NestedMeta, Lit,
-    MetaNameValue, Attribute, Type, PathArguments, GenericArgument,
+    Attribute, Data, DeriveInput, Fields, GenericArgument, Lit, Meta, MetaNameValue, NestedMeta,
+    PathArguments, Type, parse_macro_input,
 };
 
 /// Derive macro for the Entity trait
@@ -45,10 +45,10 @@ use syn::{
 #[proc_macro_derive(Entity, attributes(entity))]
 pub fn derive_entity(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    
+
     let name = &input.ident;
     let namespace = extract_namespace(&input.attrs);
-    
+
     let fields = match &input.data {
         Data::Struct(data) => match &data.fields {
             Fields::Named(fields) => &fields.named,
@@ -56,40 +56,40 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
         },
         _ => panic!("Entity can only be derived for structs"),
     };
-    
+
     // Generate field definitions
     let mut field_defs = Vec::new();
     let mut to_values_fields = Vec::new();
     let mut from_values_fields = Vec::new();
     let mut write_fields = Vec::new();
-    
+
     for field in fields {
         let field_name = field.ident.as_ref().unwrap();
-        let field_name_str = field_name.to_string();
+        let field_name_str = field_name.to_string().replace("r#", "");
         let field_attrs = parse_field_attributes(&field.attrs);
-        
+
         let (field_type, is_optional) = extract_field_type(&field.ty);
         let field_type_enum = rust_type_to_field_type(&field_type);
-        
+
         let unique_variant = match field_attrs.unique.as_deref() {
             Some("identity") => quote! { mentat_entity::Unique::Identity },
             Some("value") => quote! { mentat_entity::Unique::Value },
             _ => quote! { mentat_entity::Unique::None },
         };
-        
+
         let cardinality = if field_attrs.many {
             quote! { mentat_entity::Cardinality::Many }
         } else {
             quote! { mentat_entity::Cardinality::One }
         };
-        
+
         let indexed = field_attrs.indexed;
-        
+
         // Field definition
         field_defs.push(quote! {
             mentat_entity::FieldDefinition {
                 name: #field_name_str.to_string(),
-                ident: mentat_core::Keyword::namespaced(#namespace, #field_name_str),
+                ident: Keyword::namespaced(#namespace, #field_name_str),
                 field_type: #field_type_enum,
                 cardinality: #cardinality,
                 unique: #unique_variant,
@@ -97,10 +97,10 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
                 optional: #is_optional,
             }
         });
-        
+
         // to_values implementation
-        let keyword = quote! { mentat_core::Keyword::namespaced(#namespace, #field_name_str) };
-        
+        let keyword = quote! { Keyword::namespaced(#namespace, #field_name_str) };
+
         if is_optional {
             let to_typed_value_inner = generate_to_typed_value(&field_type, quote! { val });
             to_values_fields.push(quote! {
@@ -114,24 +114,25 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
                 values.insert(#keyword, #to_typed_value);
             });
         }
-        
+
         // from_values implementation
         let from_typed_value = generate_from_typed_value(&field_type, quote! { value });
-        
+
         if is_optional {
             from_values_fields.push(quote! {
-                #field_name: values.remove(&#keyword).map(|value| #from_typed_value).transpose()?
+                #field_name: values.remove(&#keyword).map(|value| #from_typed_value).transpose()
+                    .map_err(|e| mentat::MentatError::EntityError(e.to_string()))?
             });
         } else {
             from_values_fields.push(quote! {
                 #field_name: {
                     let value = values.remove(&#keyword)
-                        .ok_or_else(|| failure::err_msg(format!("Missing required field: {}", #field_name_str)))?;
+                        .ok_or_else(|| mentat::MentatError::EntityError(format!("Missing required field: {}", #field_name_str)))?;
                     #from_typed_value?
                 }
             });
         }
-        
+
         // write fields - similar to to_values but for EntityBuilder
         if is_optional {
             let to_typed_value_inner = generate_to_typed_value(&field_type, quote! { val });
@@ -147,7 +148,7 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
             });
         }
     }
-    
+
     // Generate the implementation
     let expanded = quote! {
         impl mentat_entity::Entity for #name {
@@ -159,91 +160,91 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
                     ],
                 }
             }
-            
+
             fn namespace() -> &'static str {
                 #namespace
             }
-            
-            fn to_values(&self) -> std::collections::HashMap<mentat_core::Keyword, core_traits::TypedValue> {
+
+            fn to_values(&self) -> std::collections::HashMap<Keyword, mentat_entity::core_traits::TypedValue> {
                 let mut values = std::collections::HashMap::new();
-                #(#to_values_fields)*
+                // #(#to_values_fields)*
                 values
             }
-            
-            fn from_values(mut values: std::collections::HashMap<mentat_core::Keyword, core_traits::TypedValue>) 
-                -> public_traits::errors::Result<Self> 
+
+            fn from_values(mut values: std::collections::HashMap<Keyword, mentat_entity::core_traits::TypedValue>)
+                -> mentat_entity::public_traits::errors::Result<Self>
             {
                 Ok(#name {
                     #(#from_values_fields),*
                 })
             }
         }
-        
+
         impl mentat_entity::EntityWrite for #name {
-            fn write<'a, 'c>(&self, in_progress: &mut mentat_transaction::InProgress<'a, 'c>) 
-                -> public_traits::errors::Result<core_traits::Entid> 
+            fn write<'a, 'c>(&self, in_progress: &mut mentat_entity::mentat_transaction::InProgress<'a, 'c>)
+                -> mentat_entity::public_traits::errors::Result<mentat_entity::core_traits::Entid>
             {
-                use mentat_transaction::entity_builder::{BuildTerms, TermBuilder};
-                
+                use mentat_entity::mentat_transaction::entity_builder::{BuildTerms, TermBuilder};
+
                 let mut builder = TermBuilder::new();
                 let entity = builder.named_tempid("e");
-                
+
                 #(#write_fields)*
-                
+
                 let (terms, tempids) = builder.build()?;
-                let report = in_progress.transact_entities(terms, tempids)?;
-                
+                let report = in_progress.transact_entities(terms)?;
+
                 // Get the entid for our temp entity
                 let entid = report.tempids.get("e")
-                    .ok_or_else(|| failure::err_msg("Failed to get entity ID from transaction"))?;
-                
+                    .ok_or_else(|| mentat::MentatError::EntityError("Failed to get entity ID from transaction".to_string()))?;
+
                 Ok(*entid)
             }
-            
-            fn write_with_entid<'a, 'c>(&self, in_progress: &mut mentat_transaction::InProgress<'a, 'c>, entid: core_traits::Entid) 
-                -> public_traits::errors::Result<core_traits::Entid> 
+
+            fn write_with_entid<'a, 'c>(&self, in_progress: &mut mentat_entity::mentat_transaction::InProgress<'a, 'c>, entid: mentat_entity::core_traits::Entid)
+                -> mentat_entity::public_traits::errors::Result<mentat_entity::core_traits::Entid>
             {
-                use mentat_transaction::entity_builder::{BuildTerms, TermBuilder};
-                
+                use mentat_entity::mentat_transaction::entity_builder::{BuildTerms, TermBuilder};
+
                 let mut builder = TermBuilder::new();
                 let entity = entid;
-                
+
                 #(#write_fields)*
-                
+
                 let (terms, tempids) = builder.build()?;
-                in_progress.transact_entities(terms, tempids)?;
-                
+                in_progress.transact_entities(terms)?;
+
                 Ok(entid)
-            }
-        }
-        
-        impl mentat_entity::EntityRead for #name {
-            fn read<'a, 'c>(in_progress: &mentat_transaction::InProgress<'a, 'c>, entid: core_traits::Entid) 
-                -> public_traits::errors::Result<Self> 
-            {
-                // Get the schema and read all attributes
-                let schema = Self::schema();
-                let values = mentat_entity::read_entity_attributes(in_progress, entid, &schema)?;
-                
-                // Convert to entity using from_values
-                Self::from_values(values)
-            }
-            
-            fn read_by_unique<'a, 'c>(
-                in_progress: &mentat_transaction::InProgress<'a, 'c>,
-                attribute: &mentat_core::Keyword,
-                value: core_traits::TypedValue,
-            ) -> public_traits::errors::Result<Self> {
-                // Find entity by unique attribute
-                let entid = mentat_entity::find_entity_by_unique(in_progress, attribute, value)?
-                    .ok_or_else(|| failure::err_msg("Entity not found"))?;
-                
-                // Read the entity
-                Self::read(in_progress, entid)
-            }
-        }
+             }
+         }
+
+         impl mentat_entity::EntityRead for #name {
+             fn read<'a, 'c>(in_progress: &mentat_entity::mentat_transaction::InProgress<'a, 'c>, entid: mentat_entity::core_traits::Entid)
+                 -> mentat_entity::public_traits::errors::Result<Self>
+             {
+                 // Get the schema and read all attributes
+                 let schema = Self::schema();
+                 let values = mentat_entity::read_entity_attributes(in_progress, entid, &schema)?;
+
+                 // Convert to entity using from_values
+                 Self::from_values(values)
+             }
+
+             fn read_by_unique<'a, 'c>(
+                 in_progress: &mentat_entity::mentat_transaction::InProgress<'a, 'c>,
+                 attribute: &Keyword,
+                 value: mentat_entity::core_traits::TypedValue,
+             ) -> mentat_entity::public_traits::errors::Result<Self> {
+                 // Find entity by unique attribute
+                 let entid = mentat_entity::find_entity_by_unique(in_progress, attribute, value)?
+                     .ok_or_else(|| mentat::MentatError::EntityError("Entity not found".to_string()))?;
+
+                 // Read the entity
+                 Self::read(in_progress, entid)
+             }
+         }
     };
-    
+
     TokenStream::from(expanded)
 }
 
@@ -252,7 +253,12 @@ fn extract_namespace(attrs: &[Attribute]) -> String {
         if attr.path.is_ident("entity") {
             if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
                 for nested in &meta_list.nested {
-                    if let NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit: Lit::Str(s), .. })) = nested {
+                    if let NestedMeta::Meta(Meta::NameValue(MetaNameValue {
+                        path,
+                        lit: Lit::Str(s),
+                        ..
+                    })) = nested
+                    {
                         if path.is_ident("namespace") {
                             return s.value();
                         }
@@ -276,13 +282,17 @@ fn parse_field_attributes(attrs: &[Attribute]) -> FieldAttributes {
         indexed: false,
         many: false,
     };
-    
+
     for attr in attrs {
         if attr.path.is_ident("entity") {
             if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
                 for nested in &meta_list.nested {
                     match nested {
-                        NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit: Lit::Str(s), .. })) => {
+                        NestedMeta::Meta(Meta::NameValue(MetaNameValue {
+                            path,
+                            lit: Lit::Str(s),
+                            ..
+                        })) => {
                             if path.is_ident("unique") {
                                 result.unique = Some(s.value());
                             }
@@ -300,7 +310,7 @@ fn parse_field_attributes(attrs: &[Attribute]) -> FieldAttributes {
             }
         }
     }
-    
+
     result
 }
 
@@ -309,7 +319,7 @@ fn extract_field_type(ty: &Type) -> (String, bool) {
         Type::Path(type_path) => {
             let segment = &type_path.path.segments.last().unwrap();
             let type_name = segment.ident.to_string();
-            
+
             // Check if it's Option<T>
             if type_name == "Option" {
                 if let PathArguments::AngleBracketed(args) = &segment.arguments {
@@ -319,7 +329,7 @@ fn extract_field_type(ty: &Type) -> (String, bool) {
                     }
                 }
             }
-            
+
             (type_name, false)
         }
         _ => panic!("Unsupported field type"),
@@ -340,76 +350,84 @@ fn rust_type_to_field_type(rust_type: &str) -> proc_macro2::TokenStream {
     }
 }
 
-fn generate_to_typed_value(field_type: &str, value_expr: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+fn generate_to_typed_value(
+    field_type: &str,
+    value_expr: proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
     match field_type {
-        "String" => quote! { core_traits::TypedValue::String(#value_expr.clone().into()) },
-        "i64" => quote! { core_traits::TypedValue::Long(#value_expr) },
-        "f64" => quote! { core_traits::TypedValue::Double((#value_expr).into()) },
-        "bool" => quote! { core_traits::TypedValue::Boolean(#value_expr) },
-        "DateTime" => quote! { core_traits::TypedValue::Instant(#value_expr) },
-        "Uuid" => quote! { core_traits::TypedValue::Uuid(#value_expr) },
-        "Keyword" => quote! { core_traits::TypedValue::Keyword(#value_expr.into()) },
-        "Entid" => quote! { core_traits::TypedValue::Ref(#value_expr) },
+        "String" => {
+            quote! { mentat_entity::core_traits::TypedValue::String(#value_expr.clone().into()) }
+        }
+        "i64" => quote! { mentat_entity::core_traits::TypedValue::Long(*#value_expr) },
+        "f64" => quote! { mentat_entity::core_traits::TypedValue::Double((*#value_expr).into()) },
+        "bool" => quote! { mentat_entity::core_traits::TypedValue::Boolean(#value_expr) },
+        "DateTime" => quote! { mentat_entity::core_traits::TypedValue::Instant(#value_expr) },
+        "Uuid" => quote! { mentat_entity::core_traits::TypedValue::Uuid(#value_expr) },
+        "Keyword" => quote! { mentat_entity::core_traits::TypedValue::Keyword(#value_expr.into()) },
+        "Entid" => quote! { mentat_entity::core_traits::TypedValue::Ref(#value_expr) },
         _ => panic!("Unsupported type conversion: {}", field_type),
     }
 }
 
-fn generate_from_typed_value(field_type: &str, value_expr: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+fn generate_from_typed_value(
+    field_type: &str,
+    value_expr: proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
     match field_type {
         "String" => quote! {
-            if let core_traits::TypedValue::String(s) = #value_expr {
+            if let mentat_entity::core_traits::TypedValue::String(s) = #value_expr {
                 Ok(s.to_string())
             } else {
-                Err(failure::err_msg("Expected String value"))
+                Err(mentat::MentatError::EntityError("Expected String value".to_string()))
             }
         },
         "i64" => quote! {
-            if let core_traits::TypedValue::Long(n) = #value_expr {
+            if let mentat_entity::core_traits::TypedValue::Long(n) = #value_expr {
                 Ok(n)
             } else {
-                Err(failure::err_msg("Expected Long value"))
+                Err(mentat::MentatError::EntityError("Expected Long value".to_string()))
             }
         },
         "f64" => quote! {
-            if let core_traits::TypedValue::Double(d) = #value_expr {
+            if let mentat_entity::core_traits::TypedValue::Double(d) = #value_expr {
                 Ok(d.into_inner())
             } else {
-                Err(failure::err_msg("Expected Double value"))
+                Err(mentat::MentatError::EntityError("Expected Double value".to_string()))
             }
         },
         "bool" => quote! {
-            if let core_traits::TypedValue::Boolean(b) = #value_expr {
+            if let mentat_entity::core_traits::TypedValue::Boolean(b) = #value_expr {
                 Ok(b)
             } else {
-                Err(failure::err_msg("Expected Boolean value"))
+                Err(mentat::MentatError::EntityError("Expected Boolean value".to_string()))
             }
         },
         "DateTime" => quote! {
-            if let core_traits::TypedValue::Instant(dt) = #value_expr {
+            if let mentat_entity::core_traits::TypedValue::Instant(dt) = #value_expr {
                 Ok(dt)
             } else {
-                Err(failure::err_msg("Expected Instant value"))
+                Err(mentat::MentatError::EntityError("Expected Instant value".to_string()))
             }
         },
         "Uuid" => quote! {
-            if let core_traits::TypedValue::Uuid(u) = #value_expr {
+            if let mentat_entity::core_traits::TypedValue::Uuid(u) = #value_expr {
                 Ok(u)
             } else {
-                Err(failure::err_msg("Expected Uuid value"))
+                Err(mentat::MentatError::EntityError("Expected Uuid value".to_string()))
             }
         },
         "Keyword" => quote! {
-            if let core_traits::TypedValue::Keyword(k) = #value_expr {
+            if let mentat_entity::core_traits::TypedValue::Keyword(k) = #value_expr {
                 Ok(k.into())
             } else {
-                Err(failure::err_msg("Expected Keyword value"))
+                Err(mentat::MentatError::EntityError("Expected Keyword value".to_string()))
             }
         },
         "Entid" => quote! {
-            if let core_traits::TypedValue::Ref(e) = #value_expr {
+            if let mentat_entity::core_traits::TypedValue::Ref(e) = #value_expr {
                 Ok(e)
             } else {
-                Err(failure::err_msg("Expected Ref value"))
+                Err(mentat::MentatError::EntityError("Expected Ref value".to_string()))
             }
         },
         _ => panic!("Unsupported type conversion: {}", field_type),

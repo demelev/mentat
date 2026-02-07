@@ -10,6 +10,8 @@
 
 use std; // To refer to std::result::Result.
 
+use thiserror::Error;
+
 use db_traits::errors::{
     DbError,
 };
@@ -20,20 +22,14 @@ use core_traits::{
 
 pub type Result<T> = std::result::Result<T, PullError>;
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum PullError {
-    #[fail(display = "attribute {:?} has no name", _0)]
+    #[error("attribute {0:?} has no name")]
     UnnamedAttribute(Entid),
 
-    #[fail(display = ":db/id repeated")]
+    #[error(":db/id repeated")]
     RepeatedDbId,
 
-    #[fail(display = "{}", _0)]
-    DbError(#[cause] DbError),
-}
-
-impl From<DbError> for PullError {
-    fn from(error: DbError) -> PullError {
-        PullError::DbError(error)
-    }
+    #[error(transparent)]
+    DbError(#[from] DbError),
 }

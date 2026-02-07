@@ -10,9 +10,8 @@ path = "lib.rs"
 [features]
 sqlcipher = ["rusqlite/sqlcipher"]
 
-[dependencies]
-failure = "0.1.1"
-failure_derive = "0.1.1"
+[dependencies.thiserror]
+workspace = true
 
 [dependencies.edn]
 path = "../edn"
@@ -21,5 +20,5 @@ path = "../edn"
 path = "../core-traits"
 
 [dependencies.rusqlite]
-version = "0.13"
+workspace = true
 features = ["limits"]

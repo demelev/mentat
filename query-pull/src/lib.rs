@@ -57,7 +57,6 @@
 ///      [*]))
 ///! ```
 
-extern crate failure;
 extern crate rusqlite;
 
 extern crate edn;

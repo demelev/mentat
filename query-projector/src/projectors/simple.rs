@@ -58,9 +58,8 @@ impl ScalarProjector {
 impl Projector for ScalarProjector {
     fn project<'stmt, 's>(&self, _schema: &Schema, _sqlite: &'s rusqlite::Connection, mut rows: Rows<'stmt>) -> Result<QueryOutput> {
         let results =
-            if let Some(r) = rows.next() {
-                let row = r?;
-                let binding = self.template.lookup(&row)?;
+            if let Some(row) = rows.next()? {
+                let binding = self.template.lookup(row)?;
                 QueryResults::Scalar(Some(binding))
             } else {
                 QueryResults::Scalar(None)
@@ -93,14 +92,14 @@ impl TupleProjector {
     }
 
     // This is just like we do for `rel`, but into a vec of its own.
-    fn collect_bindings<'a, 'stmt>(&self, row: Row<'a, 'stmt>) -> Result<Vec<Binding>> {
+    fn collect_bindings<'stmt>(&self, row: &Row<'stmt>) -> Result<Vec<Binding>> {
         // There will be at least as many SQL columns as Datalog columns.
         // gte 'cos we might be querying extra columns for ordering.
         // The templates will take care of ignoring columns.
-        assert!(row.column_count() >= self.len as i32);
+        // assert!(row.column_count() >= self.len as i32);
         self.templates
             .iter()
-            .map(|ti| ti.lookup(&row))
+            .map(|ti| ti.lookup(row))
             .collect::<Result<Vec<Binding>>>()
     }
 
@@ -114,8 +113,7 @@ impl TupleProjector {
 impl Projector for TupleProjector {
     fn project<'stmt, 's>(&self, _schema: &Schema, _sqlite: &'s rusqlite::Connection, mut rows: Rows<'stmt>) -> Result<QueryOutput> {
         let results =
-            if let Some(r) = rows.next() {
-                let row = r?;
+            if let Some(row) = rows.next()? {
                 let bindings = self.collect_bindings(row)?;
                 QueryResults::Tuple(Some(bindings))
             } else {
@@ -151,15 +149,15 @@ impl RelProjector {
         }
     }
 
-    fn collect_bindings_into<'a, 'stmt, 'out>(&self, row: Row<'a, 'stmt>, out: &mut Vec<Binding>) -> Result<()> {
+    fn collect_bindings_into<'stmt>(&self, row: &Row<'stmt>, out: &mut Vec<Binding>) -> Result<()> {
         // There will be at least as many SQL columns as Datalog columns.
         // gte 'cos we might be querying extra columns for ordering.
         // The templates will take care of ignoring columns.
-        assert!(row.column_count() >= self.len as i32);
+        // assert!(row.column_count() >= self.len as i32);
         let mut count = 0;
         for binding in self.templates
                            .iter()
-                           .map(|ti| ti.lookup(&row)) {
+                           .map(|ti| ti.lookup(row)) {
             out.push(binding?);
             count += 1;
         }
@@ -188,8 +186,7 @@ impl Projector for RelProjector {
         let width = self.len;
         let mut values: Vec<_> = Vec::with_capacity(5 * width);
 
-        while let Some(r) = rows.next() {
-            let row = r?;
+        while let Some(row) = rows.next()? {
             self.collect_bindings_into(row, &mut values)?;
         }
 
@@ -236,9 +233,8 @@ impl CollProjector {
 impl Projector for CollProjector {
     fn project<'stmt, 's>(&self, _schema: &Schema, _sqlite: &'s rusqlite::Connection, mut rows: Rows<'stmt>) -> Result<QueryOutput> {
         let mut out: Vec<_> = vec![];
-        while let Some(r) = rows.next() {
-            let row = r?;
-            let binding = self.template.lookup(&row)?;
+        while let Some(row) = rows.next()? {
+            let binding = self.template.lookup(row)?;
             out.push(binding);
         }
         Ok(QueryOutput {

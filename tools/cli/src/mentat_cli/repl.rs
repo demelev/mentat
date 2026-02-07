@@ -10,10 +10,6 @@
 
 use std::io::Write;
 
-use failure::{
-    Error,
-};
-
 use linefeed::{
     Interface,
 };
@@ -464,7 +460,7 @@ impl Repl {
         output.flush().unwrap();
     }
 
-    fn print_results(&self, query_output: QueryOutput) -> Result<(), Error> {
+    fn print_results(&self, query_output: QueryOutput) -> Result<(), Box<dyn std::error::Error>> {
         let stdout = ::std::io::stdout();
         let mut output = TabWriter::new(stdout.lock());
 

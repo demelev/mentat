@@ -8,7 +8,6 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
-extern crate failure;
 extern crate rusqlite;
 
 extern crate edn;
@@ -322,17 +321,17 @@ impl<'a, 'c> InProgress<'a, 'c> {
     }
 
     pub fn savepoint(&self, name: &str) -> Result<()> {
-        self.transaction.execute(&format!("SAVEPOINT {}", name), &[])?;
+        self.transaction.execute(&format!("SAVEPOINT {}", name), ())?;
         Ok(())
     }
 
     pub fn rollback_savepoint(&self, name: &str) -> Result<()> {
-        self.transaction.execute(&format!("ROLLBACK TO {}", name), &[])?;
+        self.transaction.execute(&format!("ROLLBACK TO {}", name), ())?;
         Ok(())
     }
 
     pub fn release_savepoint(&self, name: &str) -> Result<()> {
-        self.transaction.execute(&format!("RELEASE {}", name), &[])?;
+        self.transaction.execute(&format!("RELEASE {}", name), ())?;
         Ok(())
     }
 }

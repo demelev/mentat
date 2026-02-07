@@ -118,11 +118,11 @@ where T: Sized + Iterator<Item=Result<TxPart>> + 't {
 fn to_tx_part(row: &rusqlite::Row) -> Result<TxPart> {
     Ok(TxPart {
         partitions: None,
-        e: row.get_checked(0)?,
-        a: row.get_checked(1)?,
-        v: TypedValue::from_sql_value_pair(row.get_checked(2)?, row.get_checked(3)?)?,
-        tx: row.get_checked(4)?,
-        added: row.get_checked(5)?,
+        e: row.get(0)?,
+        a: row.get(1)?,
+        v: TypedValue::from_sql_value_pair(row.get(2)?, row.get(3)?)?,
+        tx: row.get(4)?,
+        added: row.get(5)?,
     })
 }
 
@@ -137,7 +137,7 @@ impl Processor {
         let select_query = format!("SELECT e, a, v, value_type_tag, tx, added FROM timelined_transactions {} ORDER BY tx", tx_filter);
         let mut stmt = sqlite.prepare(&select_query)?;
 
-        let mut rows = stmt.query_and_then(&[], to_tx_part)?.peekable();
+        let mut rows = stmt.query_and_then((), to_tx_part)?.peekable();
 
         // Walk the transaction table, keeping track of the current "tx".
         // Whenever "tx" changes, construct a datoms iterator and pass it to the receiver.

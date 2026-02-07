@@ -8,8 +8,6 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
-extern crate failure;
-
 extern crate indexmap;
 extern crate rusqlite;
 
@@ -364,19 +362,19 @@ impl TypedIndex {
     ///
     /// This function will return a runtime error if the type tag is unknown, or the value is
     /// otherwise not convertible by the DB layer.
-    fn lookup<'a, 'stmt>(&self, row: &Row<'a, 'stmt>) -> Result<Binding> {
+    fn lookup<'a, 'stmt>(&self, row: &Row<'stmt>) -> Result<Binding> {
         use TypedIndex::*;
 
         match self {
             &Known(value_index, value_type) => {
-                let v: rusqlite::types::Value = row.get(value_index);
+                let v: rusqlite::types::Value = row.get(value_index as usize)?;
                 TypedValue::from_sql_value_pair(v, value_type)
                     .map(|v| v.into())
                     .map_err(|e| e.into())
             },
             &Unknown(value_index, type_index) => {
-                let v: rusqlite::types::Value = row.get(value_index);
-                let value_type_tag: i32 = row.get(type_index);
+                let v: rusqlite::types::Value = row.get(value_index as usize)?;
+                let value_type_tag: i32 = row.get(type_index as usize)?;
                 TypedValue::from_sql_value_pair(v, value_type_tag)
                     .map(|v| v.into())
                     .map_err(|e| e.into())

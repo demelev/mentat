@@ -37,7 +37,7 @@ impl TxMapper {
         )?;
         for mapping in mappings.iter() {
             let uuid_bytes = mapping.remote.as_bytes().to_vec();
-            stmt.execute(&[&mapping.local, &uuid_bytes])?;
+            stmt.execute((&mapping.local, &uuid_bytes))?;
         }
         Ok(())
     }
@@ -53,7 +53,7 @@ impl TxMapper {
             None => {
                 let uuid = Uuid::new_v4();
                 let uuid_bytes = uuid.as_bytes().to_vec();
-                db_tx.execute("INSERT INTO tolstoy_tu (tx, uuid) VALUES (?, ?)", &[&tx, &uuid_bytes])?;
+                db_tx.execute("INSERT INTO tolstoy_tu (tx, uuid) VALUES (?, ?)", (&tx, &uuid_bytes))?;
                 return Ok(uuid);
             }
         }
@@ -82,8 +82,8 @@ impl TxMapper {
             "SELECT uuid FROM tolstoy_tu WHERE tx = ?"
         )?;
 
-        let results = stmt.query_and_then(&[&tx], |r| -> Result<Uuid>{
-            let bytes: Vec<u8> = r.get(0);
+        let results = stmt.query_and_then([&tx], |r| -> Result<Uuid>{
+            let bytes: Vec<u8> = r.get(0)?;
             Uuid::from_bytes(bytes.as_slice()).map_err(|e| e.into())
         })?;
 

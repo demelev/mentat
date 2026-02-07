@@ -72,10 +72,6 @@ use std::sync::Arc;
 
 use std::iter::Peekable;
 
-use failure::{
-    ResultExt,
-};
-
 use rusqlite;
 
 use core_traits::{
@@ -224,10 +220,10 @@ impl AevFactory {
     }
 
     fn row_to_aev(&mut self, row: &rusqlite::Row) -> Aev {
-        let a: Entid = row.get(0);
-        let e: Entid = row.get(1);
-        let value_type_tag: i32 = row.get(3);
-        let v = TypedValue::from_sql_value_pair(row.get(2), value_type_tag).map(|x| x).unwrap();
+        let a: Entid = row.get(0).unwrap();
+        let e: Entid = row.get(1).unwrap();
+        let value_type_tag: i32 = row.get(3).unwrap();
+        let v = TypedValue::from_sql_value_pair(row.get(2).unwrap(), value_type_tag).map(|x| x).unwrap();
         (a, e, self.intern(v))
     }
 }
@@ -238,12 +234,12 @@ pub struct AevRows<'conn, F> {
 
 /// Unwrap the Result from MappedRows. We could also use this opportunity to map_err it, but
 /// for now it's convenient to avoid error handling.
-impl<'conn, F> Iterator for AevRows<'conn, F> where F: FnMut(&rusqlite::Row) -> Aev {
+impl<'conn, F> Iterator for AevRows<'conn, F> where F: FnMut(&rusqlite::Row) -> rusqlite::Result<Aev> {
     type Item = Aev;
     fn next(&mut self) -> Option<Aev> {
         self.rows
             .next()
-            .map(|row_result| row_result.expect("All database contents should be representable"))
+            .and_then(|row_result| row_result.ok())
     }
 }
 
@@ -898,7 +894,7 @@ impl AttributeCaches {
         let table = if is_fulltext { "fulltext_datoms" } else { "datoms" };
         let sql = format!("SELECT a, e, v, value_type_tag FROM {} WHERE a = ? ORDER BY a ASC, e ASC", table);
         let args: Vec<&rusqlite::types::ToSql> = vec![&attribute];
-        let mut stmt = sqlite.prepare(&sql).context(DbErrorKind::CacheUpdateFailed)?;
+        let mut stmt = sqlite.prepare(&sql).map_err(|_| DbErrorKind::CacheUpdateFailed)?;
         let replacing = true;
         self.repopulate_from_aevt(schema, &mut stmt, args, replacing)
     }
@@ -909,7 +905,7 @@ impl AttributeCaches {
                                             args: Vec<&'v rusqlite::types::ToSql>,
                                             replacing: bool) -> Result<()> {
         let mut aev_factory = AevFactory::new();
-        let rows = statement.query_map(&args, |row| aev_factory.row_to_aev(row))?;
+        let rows = statement.query_map(rusqlite::params_from_iter(args.iter()), |row| Ok(aev_factory.row_to_aev(row)))?;
         let aevs = AevRows {
             rows: rows,
         };

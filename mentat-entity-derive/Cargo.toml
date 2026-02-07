@@ -2,7 +2,7 @@
 name = "mentat-entity-derive"
 version = "0.1.0"
 authors = ["Mentat Contributors"]
-edition = "2018"
+edition = "2024"
 
 [lib]
 proc-macro = true
@@ -11,3 +11,4 @@ proc-macro = true
 syn = "1.0"
 quote = "1.0"
 proc-macro2 = "1.0"
+public_traits = { path = "../public-traits" }
