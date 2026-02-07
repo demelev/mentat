@@ -13,7 +13,7 @@ readme = "./README.md"
 [dependencies]
 chrono = "0.4"
 itertools = "0.7"
-num = "0.1"
+num = "0.4.3"
 ordered-float = "0.5"
 pretty = "0.2"
 uuid = { version = "0.5", features = ["v4", "serde"] }

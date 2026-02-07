@@ -14,6 +14,7 @@ authors = [
 name = "mentat"
 version = "0.11.1"
 build = "build/version.rs"
+edition = "2021"
 
 [features]
 default = ["bundled_sqlite3", "syncable"]
@@ -24,19 +25,22 @@ syncable = ["mentat_tolstoy", "tolstoy_traits", "mentat_db/syncable"]
 [workspace]
 members = ["tools/cli", "ffi"]
 
+[workspace.dependencies]
+reqwest = { version = "0.12.20", features = ["json"] }
+
 [build-dependencies]
 rustc_version = "0.2"
 
 [dependencies]
 chrono = "0.4"
 failure = "0.1.1"
-lazy_static = "0.2"
+lazy_static = "1.0"
 time = "0.1"
 log = "0.4"
 uuid = { version = "0.5", features = ["v4", "serde"] }
 
 [dependencies.rusqlite]
-version = "0.13"
+version = "0.36.0"
 # System sqlite might be very old.
 features = ["limits"]
 

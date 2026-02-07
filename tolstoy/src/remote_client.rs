@@ -12,47 +12,29 @@
 
 use std;
 
-use futures::{future, Future, Stream};
-use hyper;
+use futures::{executor::block_on, Future, Stream};
+use reqwest::{IntoUrl, StatusCode, Url};
 // TODO: enable TLS support; hurdle is cross-compiling openssl for Android.
 // See https://github.com/mozilla/mentat/issues/569
 // use hyper_tls;
-use hyper::{
-    Method,
-    Request,
-    StatusCode,
-    Error as HyperError
-};
-use hyper::header::{
-    ContentType,
-};
 // TODO: https://github.com/mozilla/mentat/issues/570
 // use serde_cbor;
 use serde_json;
-use tokio_core::reactor::Core;
 use uuid::Uuid;
 
-use public_traits::errors::{
-    Result,
-};
-
+use crate::{logger, GlobalTransactionLog, Tx, TxPart};
 use logger::d;
+use public_traits::errors::Result;
 
-use types::{
-    Tx,
-    TxPart,
-    GlobalTransactionLog,
-};
-
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct SerializedHead {
-    head: Uuid
+    head: Uuid,
 }
 
 #[derive(Serialize)]
 struct SerializedTransaction<'a> {
     parent: &'a Uuid,
-    chunks: &'a Vec<Uuid>
+    chunks: &'a Vec<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -71,6 +53,7 @@ struct SerializedTransactions {
 }
 
 pub struct RemoteClient {
+    client: reqwest::Client,
     base_uri: String,
     user_uuid: Uuid,
 }
@@ -78,8 +61,9 @@ pub struct RemoteClient {
 impl RemoteClient {
     pub fn new(base_uri: String, user_uuid: Uuid) -> Self {
         RemoteClient {
-            base_uri: base_uri,
-            user_uuid: user_uuid,
+            client: reqwest::Client::new(),
+            base_uri,
+            user_uuid,
         }
     }
 
@@ -93,164 +77,114 @@ impl RemoteClient {
     // map to. I ran into borrow issues doing that - probably need to restructure
     // this and use PhantomData markers or somesuch.
     // But for now, we get code duplication.
-    fn get_uuid(&self, uri: String) -> Result<Uuid> {
-        let mut core = Core::new()?;
+    async fn get_uuid(&self, uri: String) -> Result<Uuid> {
         // TODO https://github.com/mozilla/mentat/issues/569
         // let client = hyper::Client::configure()
         //     .connector(hyper_tls::HttpsConnector::new(4, &core.handle()).unwrap())
         //     .build(&core.handle());
-        let client = hyper::Client::new(&core.handle());
-
         d(&format!("client"));
-
-        let uri = uri.parse()?;
+        let uri =
+            Url::parse(&uri).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
         d(&format!("parsed uri {:?}", uri));
-        let work = client.get(uri).and_then(|res| {
-            println!("Response: {}", res.status());
+        let head_json: SerializedHead = self
+            .client
+            .get(uri)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-            res.body().concat2().and_then(move |body| {
-                let json: SerializedHead = serde_json::from_slice(&body).map_err(|e| {
-                    std::io::Error::new(std::io::ErrorKind::Other, e)
-                })?;
-                Ok(json)
-            })
-        });
-
-        d(&format!("running..."));
-
-        let head_json = core.run(work)?;
         d(&format!("got head: {:?}", &head_json.head));
         Ok(head_json.head)
     }
 
-    fn put<T>(&self, uri: String, payload: T, expected: StatusCode) -> Result<()>
-    where hyper::Body: std::convert::From<T>, {
-        let mut core = Core::new()?;
-        // TODO https://github.com/mozilla/mentat/issues/569
-        // let client = hyper::Client::configure()
-        //     .connector(hyper_tls::HttpsConnector::new(4, &core.handle()).unwrap())
-        //     .build(&core.handle());
-        let client = hyper::Client::new(&core.handle());
-
-        let uri = uri.parse()?;
-
+    async fn put<T: serde::Serialize>(
+        &self,
+        uri: String,
+        payload: T,
+        expected: StatusCode,
+    ) -> Result<()> {
         d(&format!("PUT {:?}", uri));
 
-        let mut req = Request::new(Method::Put, uri);
-        req.headers_mut().set(ContentType::json());
-        req.set_body(payload);
+        let response = self
+            .client
+            .put(uri)
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| {
+                d(&format!("error sending PUT request: {:?}", e));
+                std::io::Error::new(std::io::ErrorKind::Other, e)
+            })?;
 
-        let put = client.request(req).and_then(|res| {
-            let status_code = res.status();
+        let status_code = response.status();
 
-            if status_code != expected {
-                d(&format!("bad put response: {:?}", status_code));
-                future::err(HyperError::Status)
-            } else {
-                future::ok(())
-            }
-        });
+        if status_code != expected {
+            d(&format!("bad put response: {:?}", status_code));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("expected {:?}, got {:?}", expected, status_code),
+            ))?;
+        }
 
-        core.run(put)?;
         Ok(())
     }
 
-    fn get_transactions(&self, parent_uuid: &Uuid) -> Result<Vec<Uuid>> {
-        let mut core = Core::new()?;
-        // TODO https://github.com/mozilla/mentat/issues/569
-        // let client = hyper::Client::configure()
-        //     .connector(hyper_tls::HttpsConnector::new(4, &core.handle()).unwrap())
-        //     .build(&core.handle());
-        let client = hyper::Client::new(&core.handle());
-
+    async fn get_transactions(&self, parent_uuid: &Uuid) -> Result<Vec<Uuid>> {
         d(&format!("client"));
 
-        let uri = format!("{}/transactions?from={}", self.bound_base_uri(), parent_uuid);
-        let uri = uri.parse()?;
+        let uri = format!(
+            "{}/transactions?from={}",
+            self.bound_base_uri(),
+            parent_uuid
+        );
 
-        d(&format!("parsed uri {:?}", uri));
+        let response = self.client.get(uri).send().await?;
+        println!("Response: {}", response.status());
 
-        let work = client.get(uri).and_then(|res| {
-            println!("Response: {}", res.status());
+        let body = response.bytes().await?;
+        let json: SerializedTransactions = serde_json::from_slice(&body)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-            res.body().concat2().and_then(move |body| {
-                let json: SerializedTransactions = serde_json::from_slice(&body).map_err(|e| {
-                    std::io::Error::new(std::io::ErrorKind::Other, e)
-                })?;
-                Ok(json)
-            })
-        });
-
-        d(&format!("running..."));
-
-        let transactions_json = core.run(work)?;
-        d(&format!("got transactions: {:?}", &transactions_json.transactions));
-        Ok(transactions_json.transactions)
+        d(&format!("got transactions: {:?}", &json.transactions));
+        Ok(json.transactions)
     }
 
-    fn get_chunks(&self, transaction_uuid: &Uuid) -> Result<Vec<Uuid>> {
-        let mut core = Core::new()?;
+    async fn get_chunks(&self, transaction_uuid: &Uuid) -> Result<Vec<Uuid>> {
+        let uri = format!(
+            "{}/transactions/{}",
+            self.bound_base_uri(),
+            transaction_uuid
+        );
+
+        let response = self.client.get(uri).send().await?;
+        println!("Response: {}", response.status());
+
+        let body = response.bytes().await?;
+        let json: DeserializableTransaction = serde_json::from_slice(&body)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        d(&format!("got transaction chunks: {:?}", &json.chunks));
+        Ok(json.chunks)
+    }
+
+    async fn get_chunk(&self, chunk_uuid: &Uuid) -> Result<TxPart> {
         // TODO https://github.com/mozilla/mentat/issues/569
         // let client = hyper::Client::configure()
         //     .connector(hyper_tls::HttpsConnector::new(4, &core.handle()).unwrap())
         //     .build(&core.handle());
-        let client = hyper::Client::new(&core.handle());
-
-        d(&format!("client"));
-
-        let uri = format!("{}/transactions/{}", self.bound_base_uri(), transaction_uuid);
-        let uri = uri.parse()?;
-
-        d(&format!("parsed uri {:?}", uri));
-
-        let work = client.get(uri).and_then(|res| {
-            println!("Response: {}", res.status());
-
-            res.body().concat2().and_then(move |body| {
-                let json: DeserializableTransaction = serde_json::from_slice(&body).map_err(|e| {
-                    std::io::Error::new(std::io::ErrorKind::Other, e)
-                })?;
-                Ok(json)
-            })
-        });
-
-        d(&format!("running..."));
-
-        let transaction_json = core.run(work)?;
-        d(&format!("got transaction chunks: {:?}", &transaction_json.chunks));
-        Ok(transaction_json.chunks)
-    }
-
-    fn get_chunk(&self, chunk_uuid: &Uuid) -> Result<TxPart> {
-        let mut core = Core::new()?;
-        // TODO https://github.com/mozilla/mentat/issues/569
-        // let client = hyper::Client::configure()
-        //     .connector(hyper_tls::HttpsConnector::new(4, &core.handle()).unwrap())
-        //     .build(&core.handle());
-        let client = hyper::Client::new(&core.handle());
-
         d(&format!("client"));
 
         let uri = format!("{}/chunks/{}", self.bound_base_uri(), chunk_uuid);
-        let uri = uri.parse()?;
 
-        d(&format!("parsed uri {:?}", uri));
-
-        let work = client.get(uri).and_then(|res| {
-            println!("Response: {}", res.status());
-
-            res.body().concat2().and_then(move |body| {
-                let json: TxPart = serde_json::from_slice(&body).map_err(|e| {
-                    std::io::Error::new(std::io::ErrorKind::Other, e)
-                })?;
-                Ok(json)
-            })
-        });
-
-        d(&format!("running..."));
-
-        let chunk = core.run(work)?;
+        let response = self.client.get(uri).send().await?;
+        let body = response.bytes().await?;
+        let chunk: TxPart = serde_json::from_slice(&body)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        d(&format!("got chunk: {:?}", &chunk));
         d(&format!("got transaction chunk: {:?}", &chunk));
         Ok(chunk)
     }
@@ -259,43 +193,41 @@ impl RemoteClient {
 impl GlobalTransactionLog for RemoteClient {
     fn head(&self) -> Result<Uuid> {
         let uri = format!("{}/head", self.bound_base_uri());
-        self.get_uuid(uri)
+        block_on(self.get_uuid(uri))
     }
 
     fn set_head(&mut self, uuid: &Uuid) -> Result<()> {
         // {"head": uuid}
-        let head = SerializedHead {
-            head: uuid.clone()
-        };
+        let head = SerializedHead { head: uuid.clone() };
 
         let uri = format!("{}/head", self.bound_base_uri());
         let json = serde_json::to_string(&head)?;
         d(&format!("serialized head: {:?}", json));
-        self.put(uri, json, StatusCode::NoContent)
+        block_on(self.put(uri, json, StatusCode::NO_CONTENT))
     }
 
     /// Slurp transactions and datoms after `tx`, returning them as owned data.
     ///
     /// This is inefficient but convenient for development.
     fn transactions_after(&self, tx: &Uuid) -> Result<Vec<Tx>> {
-        let new_txs = self.get_transactions(tx)?;
+        let new_txs = block_on(self.get_transactions(tx))?;
         let mut tx_list = Vec::new();
 
         for tx in new_txs {
             let mut tx_parts = Vec::new();
-            let chunks = self.get_chunks(&tx)?;
+            let chunks = block_on(self.get_chunks(&tx))?;
 
             // We pass along all of the downloaded parts, including transaction's
             // metadata datom. Transactor is expected to do the right thing, and
             // use txInstant from one of our datoms.
             for chunk in chunks {
-                let part = self.get_chunk(&chunk)?;
+                let part = block_on(self.get_chunk(&chunk))?;
                 tx_parts.push(part);
             }
 
             tx_list.push(Tx {
                 tx: tx.into(),
-                parts: tx_parts
+                parts: tx_parts,
             });
         }
 
@@ -304,17 +236,38 @@ impl GlobalTransactionLog for RemoteClient {
         Ok(tx_list)
     }
 
-    fn put_transaction(&mut self, transaction_uuid: &Uuid, parent_uuid: &Uuid, chunks: &Vec<Uuid>) -> Result<()> {
+    fn put_transaction(
+        &mut self,
+        transaction_uuid: &Uuid,
+        parent_uuid: &Uuid,
+        chunks: &Vec<Uuid>,
+    ) -> Result<()> {
         // {"parent": uuid, "chunks": [chunk1, chunk2...]}
         let transaction = SerializedTransaction {
             parent: parent_uuid,
-            chunks: chunks
+            chunks,
         };
 
-        let uri = format!("{}/transactions/{}", self.bound_base_uri(), transaction_uuid);
+        let uri = format!(
+            "{}/transactions/{}",
+            self.bound_base_uri(),
+            transaction_uuid
+        );
         let json = serde_json::to_string(&transaction)?;
         d(&format!("serialized transaction: {:?}", json));
-        self.put(uri, json, StatusCode::Created)
+        block_on(
+            self.client
+                .put(uri)
+                .header("Content-Type", "application/json")
+                .json(&transaction)
+                .send(),
+        )
+        .map_err(|e| {
+            d(&format!("error sending PUT request: {:?}", e));
+            std::io::Error::new(std::io::ErrorKind::Other, e)
+        })?;
+
+        Ok(())
     }
 
     fn put_chunk(&mut self, chunk_uuid: &Uuid, payload: &TxPart) -> Result<()> {
@@ -322,7 +275,7 @@ impl GlobalTransactionLog for RemoteClient {
         let uri = format!("{}/chunks/{}", self.bound_base_uri(), chunk_uuid);
         d(&format!("serialized chunk: {:?}", payload));
         // TODO don't want to clone every datom!
-        self.put(uri, payload, StatusCode::Created)
+        block_on(self.put(uri, payload, StatusCode::CREATED))
     }
 }
 
@@ -336,6 +289,9 @@ mod tests {
         let user_uuid = Uuid::from_str(&"316ea470-ce35-4adf-9c61-e0de6e289c59").expect("uuid");
         let server_uri = String::from("https://example.com/api/0.1");
         let remote_client = RemoteClient::new(server_uri, user_uuid);
-        assert_eq!("https://example.com/api/0.1/316ea470-ce35-4adf-9c61-e0de6e289c59", remote_client.bound_base_uri());
+        assert_eq!(
+            "https://example.com/api/0.1/316ea470-ce35-4adf-9c61-e0de6e289c59",
+            remote_client.bound_base_uri()
+        );
     }
 }

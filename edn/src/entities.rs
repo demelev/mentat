@@ -10,21 +10,14 @@
 
 //! This module defines core types that support the transaction processor.
 
-use std::collections::BTreeMap;
 use std::fmt;
+use std::{collections::BTreeMap, fmt::Display};
 
-use value_rc::{
-    ValueRc,
-};
+use value_rc::ValueRc;
 
-use symbols::{
-    Keyword,
-    PlainSymbol,
-};
+use symbols::{Keyword, PlainSymbol};
 
-use types::{
-    ValueAndSpan,
-};
+use types::ValueAndSpan;
 
 /// `EntityPlace` and `ValuePlace` embed values, either directly (i.e., `ValuePlace::Atom`) or
 /// indirectly (i.e., `EntityPlace::LookupRef`).  In order to maintain the graph of `Into` and
@@ -38,7 +31,7 @@ impl TransactableValueMarker for ValueAndSpan {}
 
 /// A tempid, either an external tempid given in a transaction (usually as an `Value::Text`),
 /// or an internal tempid allocated by Mentat itself.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
 pub enum TempId {
     External(String),
     Internal(i64),
@@ -53,6 +46,11 @@ impl TempId {
     }
 }
 
+impl From<String> for TempId {
+    fn from(temp_id: String) -> Self {
+        TempId::External(temp_id)
+    }
+}
 impl fmt::Display for TempId {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
@@ -62,10 +60,18 @@ impl fmt::Display for TempId {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
 pub enum EntidOrIdent {
     Entid(i64),
     Ident(Keyword),
+}
+impl Display for EntidOrIdent {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            &EntidOrIdent::Entid(id) => write!(f, "{}", id),
+            &EntidOrIdent::Ident(ref keyword) => write!(f, "{}", keyword),
+        }
+    }
 }
 
 impl From<i64> for EntidOrIdent {
@@ -89,7 +95,7 @@ impl EntidOrIdent {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
 pub struct LookupRef<V> {
     pub a: AttributePlace,
     // In theory we could allow nested lookup-refs.  In practice this would require us to process
@@ -109,14 +115,14 @@ pub struct LookupRef<V> {
 /// (transaction-tx) n)` to find the n-th ancestor of the current transaction.  If we do accept
 /// arguments, then the special case of `(lookup-ref a v)` should be handled as part of the
 /// generalization.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
 pub struct TxFunction {
     pub op: PlainSymbol,
 }
 
 pub type MapNotation<V> = BTreeMap<EntidOrIdent, ValuePlace<V>>;
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
 pub enum ValuePlace<V> {
     // We never know at parse-time whether an integer or ident is really an entid, but we will often
     // know when building entities programmatically.
@@ -129,6 +135,33 @@ pub enum ValuePlace<V> {
     Vector(Vec<ValuePlace<V>>),
     Atom(V),
     MapNotation(MapNotation<V>),
+}
+impl<T: Display> Display for ValuePlace<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            ValuePlace::Entid(e) => write!(f, "{}", e),
+            ValuePlace::TempId(t) => write!(f, "{}", t),
+            ValuePlace::LookupRef(l) => write!(f, "{}", l.a),
+            ValuePlace::TxFunction(tx_fn) => write!(f, "{}", tx_fn.op),
+            ValuePlace::Vector(v) => write!(
+                f,
+                "[{}]",
+                v.iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            ValuePlace::Atom(a) => write!(f, "{}", a),
+            ValuePlace::MapNotation(m) => write!(
+                f,
+                "{{{}}}",
+                m.iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
+    }
 }
 
 impl<V: TransactableValueMarker> From<EntidOrIdent> for ValuePlace<V> {
@@ -217,9 +250,16 @@ impl<V: TransactableValueMarker> From<TxFunction> for EntityPlace<V> {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
 pub enum AttributePlace {
     Entid(EntidOrIdent),
+}
+impl Display for AttributePlace {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            &AttributePlace::Entid(ref e) => write!(f, "{}", e),
+        }
+    }
 }
 
 impl<A: Into<EntidOrIdent>> From<A> for AttributePlace {

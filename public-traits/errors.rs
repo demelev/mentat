@@ -10,7 +10,7 @@
 
 #![allow(dead_code)]
 
-use std; // To refer to std::result::Result.
+use std::{self, convert::TryFrom}; // To refer to std::result::Result.
 
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -20,31 +20,16 @@ use uuid;
 
 use edn;
 
-use core_traits::{
-    Attribute,
-    ValueType,
-};
+use core_traits::{Attribute, ValueType};
 
-use db_traits::errors::{
-    DbError,
-};
-use query_algebrizer_traits::errors::{
-    AlgebrizerError,
-};
-use query_projector_traits::errors::{
-    ProjectorError,
-};
-use query_pull_traits::errors::{
-    PullError,
-};
-use sql_traits::errors::{
-    SQLError,
-};
+use db_traits::errors::DbError;
+use query_algebrizer_traits::errors::AlgebrizerError;
+use query_projector_traits::errors::ProjectorError;
+use query_pull_traits::errors::PullError;
+use sql_traits::errors::SQLError;
 
 #[cfg(feature = "syncable")]
-use tolstoy_traits::errors::{
-    TolstoyError,
-};
+use tolstoy_traits::errors::TolstoyError;
 
 #[cfg(feature = "syncable")]
 use hyper;
@@ -53,6 +38,14 @@ use hyper;
 use serde_json;
 
 pub type Result<T> = std::result::Result<T, MentatError>;
+
+// impl TryFrom<reqwest::Error> for crate::errors::MentatError {
+//     type Error = ();
+//
+//     fn try_from(error: reqwest::Error) -> std::result::Result<crate::errors::MentatError, ()> {
+//         Ok(crate::errors::MentatError::NetworkError(error))
+//     }
+// }
 
 #[derive(Debug, Fail)]
 pub enum MentatError {
@@ -74,10 +67,16 @@ pub enum MentatError {
     #[fail(display = "invalid vocabulary version")]
     InvalidVocabularyVersion,
 
-    #[fail(display = "vocabulary {}/version {} already has attribute {}, and the requested definition differs", _0, _1, _2)]
+    #[fail(
+        display = "vocabulary {}/version {} already has attribute {}, and the requested definition differs",
+        _0, _1, _2
+    )]
     ConflictingAttributeDefinitions(String, u32, String, Attribute, Attribute),
 
-    #[fail(display = "existing vocabulary {} too new: wanted version {}, got version {}", _0, _1, _2)]
+    #[fail(
+        display = "existing vocabulary {} too new: wanted version {}, got version {}",
+        _0, _1, _2
+    )]
     ExistingVocabularyTooNew(String, u32, u32),
 
     #[fail(display = "core schema: wanted version {}, got version {:?}", _0, _1)]
@@ -92,7 +91,10 @@ pub enum MentatError {
     #[fail(display = "schema changed since query was prepared")]
     PreparedQuerySchemaMismatch,
 
-    #[fail(display = "provided value of type {} doesn't match attribute value type {}", _0, _1)]
+    #[fail(
+        display = "provided value of type {} doesn't match attribute value type {}",
+        _0, _1
+    )]
     ValueTypeMismatch(ValueType, ValueType),
 
     #[fail(display = "{}", _0)]
@@ -135,11 +137,11 @@ pub enum MentatError {
 
     #[cfg(feature = "syncable")]
     #[fail(display = "{}", _0)]
-    NetworkError(#[cause] hyper::Error),
+    NetworkError(#[cause] reqwest::Error),
 
     #[cfg(feature = "syncable")]
     #[fail(display = "{}", _0)]
-    UriError(#[cause] hyper::error::UriError),
+    UriError(#[cause] hyper::Error),
 
     #[cfg(feature = "syncable")]
     #[fail(display = "{}", _0)]
@@ -156,7 +158,7 @@ impl From<rusqlite::Error> for MentatError {
     fn from(error: rusqlite::Error) -> MentatError {
         let cause = match error.cause() {
             Some(e) => e.to_string(),
-            None => "".to_string()
+            None => "".to_string(),
         };
         MentatError::RusqliteError(error.to_string(), cause)
     }
@@ -219,15 +221,8 @@ impl From<serde_json::Error> for MentatError {
 }
 
 #[cfg(feature = "syncable")]
-impl From<hyper::Error> for MentatError {
-    fn from(error: hyper::Error) -> MentatError {
+impl From<reqwest::Error> for MentatError {
+    fn from(error: reqwest::Error) -> MentatError {
         MentatError::NetworkError(error)
-    }
-}
-
-#[cfg(feature = "syncable")]
-impl From<hyper::error::UriError> for MentatError {
-    fn from(error: hyper::error::UriError) -> MentatError {
-        MentatError::UriError(error)
     }
 }

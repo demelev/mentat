@@ -939,7 +939,7 @@ fn test_upgrade_with_functions() {
             self.definitions.clone()
         }
 
-        fn pre(&mut self, _in_progress: &mut InProgress, checks: &VocabularyStatus) -> mentat::errors::Result<()> {
+        fn pre(&mut self, _in_progress: &mut InProgress, checks: &dyn VocabularyStatus) -> mentat::errors::Result<()> {
             // Take a look at the work the vocabulary manager thinks needs to be done, and see whether we
             // need to migrate data.
             // We'll simulate that here by tracking the version.

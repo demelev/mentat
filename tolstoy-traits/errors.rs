@@ -8,16 +8,14 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
+use hyper;
+use rusqlite;
+use serde_json;
 use std;
 use std::error::Error;
-use rusqlite;
 use uuid;
-use hyper;
-use serde_json;
 
-use db_traits::errors::{
-    DbError,
-};
+use db_traits::errors::DbError;
 
 #[derive(Debug, Fail)]
 pub enum TolstoyError {
@@ -64,7 +62,7 @@ pub enum TolstoyError {
     NetworkError(#[cause] hyper::Error),
 
     #[fail(display = "{}", _0)]
-    UriError(#[cause] hyper::error::UriError),
+    UriError(#[cause] hyper::Error),
 }
 
 impl From<DbError> for TolstoyError {
@@ -81,9 +79,9 @@ impl From<serde_json::Error> for TolstoyError {
 
 impl From<rusqlite::Error> for TolstoyError {
     fn from(error: rusqlite::Error) -> TolstoyError {
-        let cause = match error.cause() {
+        let cause = match error.source() {
             Some(e) => e.to_string(),
-            None => "".to_string()
+            None => "".to_string(),
         };
         TolstoyError::RusqliteError(error.to_string(), cause)
     }
@@ -107,8 +105,8 @@ impl From<hyper::Error> for TolstoyError {
     }
 }
 
-impl From<hyper::error::UriError> for TolstoyError {
-    fn from(error: hyper::error::UriError) -> TolstoyError {
-        TolstoyError::UriError(error)
-    }
-}
+// impl From<hyper::Error> for TolstoyError {
+//     fn from(error: hyper::Error) -> TolstoyError {
+//         TolstoyError::UriError(error)
+//     }
+// }

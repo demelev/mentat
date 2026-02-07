@@ -1,0 +1,10 @@
+{
+  "checkOnSave": {
+    "command": "clippy",
+    "allTargets": true
+  },
+  "cargo": {
+    "loadOutDirsFromCheck": true,
+    "runBuildScripts": true
+  }
+}
