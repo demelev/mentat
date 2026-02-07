@@ -1,0 +1,45 @@
+[package]
+name = "mentat-entity"
+version = "0.1.0"
+authors = ["Mentat Contributors"]
+edition = "2024"
+
+[dependencies]
+chrono = "0.4"
+
+[dependencies.edn]
+path = "../edn"
+
+[dependencies.core_traits]
+path = "../core-traits"
+
+[dependencies.mentat_core]
+path = "../core"
+
+[dependencies.mentat_db]
+path = "../db"
+
+[dependencies.db_traits]
+path = "../db-traits"
+
+[dependencies.mentat_transaction]
+path = "../transaction"
+
+[dependencies.public_traits]
+path = "../public-traits"
+
+[dependencies.mentat-entity-derive]
+path = "../mentat-entity-derive"
+
+[dependencies.thiserror]
+workspace = true
+
+[dependencies.uuid]
+version = "0.5"
+features = [
+    "v4",
+    "serde",
+]
+
+[features]
+default = []

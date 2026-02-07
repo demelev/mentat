@@ -28,7 +28,7 @@ fn can_import_sqlite() {
                   name            TEXT NOT NULL,
                   data            BLOB
                   )",
-        [],
+        (),
     )
     .unwrap();
     let me = Person {
@@ -45,7 +45,7 @@ fn can_import_sqlite() {
 
     let mut stmt = conn.prepare("SELECT id, name, data FROM person").unwrap();
     let person_iter = stmt
-        .query_map([], |row| {
+        .query_map((), |row| {
             Ok(Person {
                 id: row.get(0)?,
                 name: row.get(1)?,

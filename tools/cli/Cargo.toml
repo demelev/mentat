@@ -22,10 +22,9 @@ test = false
 combine = "2.2.2"
 dirs = "1.0.3"
 env_logger = "0.5"
-failure = "0.1.1"
-failure_derive = "0.1.1"
+thiserror = "2.0"
 getopts = "0.2"
-lazy_static = "1.0"
+lazy_static = "1.5"
 linefeed = "0.5"
 log = "0.4"
 tabwriter = "1"
@@ -34,7 +33,7 @@ termion = "1"
 time = "0.1"
 
 [dependencies.rusqlite]
-version = "0.36"
+workspace = true
 features = ["limits"]
 
 [dependencies.mentat]

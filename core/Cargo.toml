@@ -4,12 +4,26 @@ version = "0.0.1"
 workspace = ".."
 
 [dependencies]
-chrono = { version = "0.4", features = ["serde"] }
 enum-set = "0.0.7"
-failure = "0.1.1"
 indexmap = "1"
-ordered-float = { version = "0.5", features = ["serde"] }
-uuid = { version = "0.5", features = ["v4", "serde"] }
+
+[dependencies.chrono]
+version = "0.4"
+features = ["serde"]
+
+[dependencies.thiserror]
+workspace = true
+
+[dependencies.ordered-float]
+version = "0.5"
+features = ["serde"]
+
+[dependencies.uuid]
+version = "0.5"
+features = [
+    "v4",
+    "serde",
+]
 
 [dependencies.core_traits]
 path = "../core-traits"

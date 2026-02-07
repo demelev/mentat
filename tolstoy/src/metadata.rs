@@ -10,21 +10,22 @@
 
 #![allow(dead_code)]
 
+use rusqlite;
 use uuid::Uuid;
 
 use core_traits::Entid;
 
-use crate::schema;
+use schema;
 
-use public_traits::errors::{MentatError, Result};
+use public_traits::errors::Result;
 
 use tolstoy_traits::errors::TolstoyError;
 
 use mentat_db::{db, Partition, PartitionMap};
 
-use crate::types::LocalGlobalTxMapping;
+use types::LocalGlobalTxMapping;
 
-use crate::TxMapper;
+use TxMapper;
 
 // Could be Copy, but that might change
 pub struct SyncMetadata {
@@ -44,26 +45,35 @@ pub enum PartitionsTable {
 
 impl SyncMetadata {
     pub fn new(root: Entid, head: Entid) -> SyncMetadata {
-        SyncMetadata { root, head }
+        SyncMetadata {
+            root: root,
+            head: head,
+        }
     }
 
     pub fn remote_head(tx: &rusqlite::Transaction) -> Result<Uuid> {
         tx.query_row(
             "SELECT value FROM tolstoy_metadata WHERE key = ?",
-            &[&schema::REMOTE_HEAD_KEY],
+            [&schema::REMOTE_HEAD_KEY],
             |r| {
-                let bytes: [u8; 16] = r.get(0)?;
-                Ok(Uuid::from_bytes(&bytes))
+                let bytes: Vec<u8> = r.get(0)?;
+                Uuid::from_bytes(bytes.as_slice()).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Blob,
+                        Box::new(e),
+                    )
+                })
             },
-        )?
+        )
         .map_err(|e| e.into())
     }
 
     pub fn set_remote_head(tx: &rusqlite::Transaction, uuid: &Uuid) -> Result<()> {
-        let uuid_bytes = uuid.as_bytes();
+        let uuid_bytes = uuid.as_bytes().to_vec();
         let updated = tx.execute(
             "UPDATE tolstoy_metadata SET value = ? WHERE key = ?",
-            (&uuid_bytes[..], schema::REMOTE_HEAD_KEY),
+            (&uuid_bytes, &schema::REMOTE_HEAD_KEY),
         )?;
         if updated != 1 {
             bail!(TolstoyError::DuplicateMetadata(
@@ -93,7 +103,7 @@ impl SyncMetadata {
                 let mut stmt: ::rusqlite::Statement =
                     tx.prepare("SELECT part, start, end, idx, allow_excision FROM tolstoy_parts")?;
                 let m: Result<PartitionMap> = stmt
-                    .query_and_then([], |row| -> Result<(String, Partition)> {
+                    .query_and_then((), |row| -> Result<(String, Partition)> {
                         Ok((
                             row.get(0)?,
                             Partition::new(row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?),
@@ -110,7 +120,7 @@ impl SyncMetadata {
             "SELECT tx FROM timelined_transactions WHERE timeline = 0 GROUP BY tx ORDER BY tx",
         )?;
         let txs: Vec<_> = stmt
-            .query_and_then([], |row| -> Result<Entid> { Ok(row.get(0)?) })?
+            .query_and_then((), |row| -> Result<Entid> { Ok(row.get(0)?) })?
             .collect();
 
         let mut txs = txs.into_iter();
@@ -138,7 +148,7 @@ impl SyncMetadata {
             after_clause
         ))?;
         let txs: Vec<_> = stmt
-            .query_and_then([], |row| -> Result<Entid> { Ok(row.get(0)?) })?
+            .query_and_then((), |row| -> Result<Entid> { Ok(row.get(0)?) })?
             .collect();
 
         let mut all = Vec::with_capacity(txs.len());
@@ -150,8 +160,10 @@ impl SyncMetadata {
     }
 
     pub fn is_tx_empty(db_tx: &rusqlite::Transaction, tx_id: Entid) -> Result<bool> {
-        let count = db_tx.query_row("SELECT count(rowid) FROM timelined_transactions WHERE timeline = 0 AND tx = ? AND e != ?", [&tx_id, &tx_id], |row| -> rusqlite::Result<i64> { Ok(row.get(0)?) });
-        Ok(count? == 0)
+        let count: i64 = db_tx.query_row("SELECT count(rowid) FROM timelined_transactions WHERE timeline = 0 AND tx = ? AND e != ?", [&tx_id, &tx_id], |row| {
+            row.get(0)
+        })?;
+        Ok(count == 0)
     }
 
     pub fn has_entity_assertions_in_tx(
@@ -159,16 +171,19 @@ impl SyncMetadata {
         e: Entid,
         tx_id: Entid,
     ) -> Result<bool> {
-        let count = db_tx.query_row("SELECT count(rowid) FROM timelined_transactions WHERE timeline = 0 AND tx = ? AND e = ?", &[&tx_id, &e], |row| -> rusqlite::Result<i64> {
-            Ok(row.get(0)?)
-        });
-        Ok(count? > 0)
+        let count: i64 = db_tx.query_row("SELECT count(rowid) FROM timelined_transactions WHERE timeline = 0 AND tx = ? AND e = ?", [&tx_id, &e], |row| {
+            row.get(0)
+        })?;
+        Ok(count > 0)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use mentat_db::db;
+    use rusqlite::params;
 
     #[test]
     fn test_get_remote_head_default() {
@@ -233,25 +248,25 @@ mod tests {
         db_tx
             .execute(
                 "INSERT INTO timelined_transactions VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (&65536, &1, ":person/name", &268435457, &1, &13, &0),
+                params![&65536, &1, &":person/name", &268435457, &1, &13, &0],
             )
             .expect("inserted");
         db_tx
             .execute(
                 "INSERT INTO timelined_transactions VALUES (?, ?, ?, ?, ?, ?, ?)",
-                &[&65536, &7, &27, &268435457, &1, &0, &0],
+                params![&65536, &7, &27, &268435457, &1, &0, &0],
             )
             .expect("inserted");
         db_tx
             .execute(
                 "INSERT INTO timelined_transactions VALUES (?, ?, ?, ?, ?, ?, ?)",
-                &[&65536, &9, &36, &268435457, &1, &0, &0],
+                params![&65536, &9, &36, &268435457, &1, &0, &0],
             )
             .expect("inserted");
         db_tx
             .execute(
                 "INSERT INTO timelined_transactions VALUES (?, ?, ?, ?, ?, ?, ?)",
-                &[&65536, &11, &1, &268435457, &1, &1, &0],
+                params![&65536, &11, &1, &268435457, &1, &1, &0],
             )
             .expect("inserted");
 

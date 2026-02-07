@@ -9,9 +9,7 @@
 // specific language governing permissions and limitations under the License.
 
 
-extern crate failure;
-#[macro_use]
-extern crate failure_derive;
+extern crate thiserror;
 extern crate rusqlite;
 
 extern crate edn;

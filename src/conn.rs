@@ -39,8 +39,8 @@ use mentat_transaction::{CacheAction, CacheDirection, InProgress, InProgressRead
 use public_traits::errors::{MentatError, Result};
 
 use mentat_transaction::query::{
-    lookup_value_for_attribute, lookup_values_for_attribute, q_explain, q_once, q_prepare,
-    q_uncached, Known, PreparedResult, QueryExplanation, QueryInputs, QueryOutput,
+    Known, PreparedResult, QueryExplanation, QueryInputs, QueryOutput, lookup_value_for_attribute,
+    lookup_values_for_attribute, q_explain, q_once, q_prepare, q_uncached,
 };
 
 /// A mutable, safe reference to the current Mentat store.
@@ -406,7 +406,7 @@ mod tests {
         match conn.transact(&mut sqlite, t.as_str()) {
             Err(MentatError::DbError(e)) => {
                 assert_eq!(
-                    e.kind(),
+                    e,
                     ::db_traits::errors::DbErrorKind::UnallocatedEntid(next + 1)
                 );
             }
@@ -437,7 +437,7 @@ mod tests {
             Err(MentatError::DbError(e)) => {
                 // All this, despite this being the ID we were about to allocate!
                 assert_eq!(
-                    e.kind(),
+                    e,
                     ::db_traits::errors::DbErrorKind::UnallocatedEntid(next)
                 );
             }
@@ -673,7 +673,7 @@ mod tests {
                                                   [:db/add \"u\" :db/ident :b/keyword]]",
         );
         match report.expect_err("expected transact error") {
-            MentatError::DbError(e) => match e.kind() {
+            MentatError::DbError(e) => match e {
                 ::db_traits::errors::DbErrorKind::SchemaConstraintViolation(_) => {}
                 _ => panic!("expected SchemaConstraintViolation"),
             },

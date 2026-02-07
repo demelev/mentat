@@ -7,6 +7,5 @@ workspace = ".."
 name = "sql_traits"
 path = "lib.rs"
 
-[dependencies]
-failure = "0.1.1"
-failure_derive = "0.1.1"
+[dependencies.thiserror]
+workspace = true

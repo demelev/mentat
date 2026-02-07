@@ -97,8 +97,8 @@ use core_traits::KnownEntid;
 use core_traits::attribute::Unique;
 
 use crate::{
-    Attribute, Binding, Entid, HasSchema, IntoResult, Keyword, TypedValue, ValueType,
-    CORE_SCHEMA_VERSION,
+    Attribute, Binding, CORE_SCHEMA_VERSION, Entid, HasSchema, IntoResult, Keyword, TypedValue,
+    ValueType,
 };
 
 use crate::errors::{MentatError, Result};
@@ -284,27 +284,27 @@ impl Vocabularies {
         self.0.get(name)
     }
 
-    pub fn iter(&self) -> ::std::collections::btree_map::Iter<Keyword, Vocabulary> {
+    pub fn iter(&'_ self) -> std::collections::btree_map::Iter<'_, Keyword, Vocabulary> {
         self.0.iter()
     }
 }
 
 lazy_static! {
-    static ref DB_SCHEMA_CORE: Keyword = { kw!(:db.schema/core) };
-    static ref DB_SCHEMA_ATTRIBUTE: Keyword = { kw!(:db.schema/attribute) };
-    static ref DB_SCHEMA_VERSION: Keyword = { kw!(:db.schema/version) };
-    static ref DB_IDENT: Keyword = { kw!(:db/ident) };
-    static ref DB_UNIQUE: Keyword = { kw!(:db/unique) };
-    static ref DB_UNIQUE_VALUE: Keyword = { kw!(:db.unique/value) };
-    static ref DB_UNIQUE_IDENTITY: Keyword = { kw!(:db.unique/identity) };
-    static ref DB_IS_COMPONENT: Keyword = { Keyword::namespaced("db", "isComponent") };
-    static ref DB_VALUE_TYPE: Keyword = { Keyword::namespaced("db", "valueType") };
-    static ref DB_INDEX: Keyword = { kw!(:db/index) };
-    static ref DB_FULLTEXT: Keyword = { kw!(:db/fulltext) };
-    static ref DB_CARDINALITY: Keyword = { kw!(:db/cardinality) };
-    static ref DB_CARDINALITY_ONE: Keyword = { kw!(:db.cardinality/one) };
-    static ref DB_CARDINALITY_MANY: Keyword = { kw!(:db.cardinality/many) };
-    static ref DB_NO_HISTORY: Keyword = { Keyword::namespaced("db", "noHistory") };
+    static ref DB_SCHEMA_CORE: Keyword = kw!(:db.schema/core);
+    static ref DB_SCHEMA_ATTRIBUTE: Keyword = kw!(:db.schema/attribute);
+    static ref DB_SCHEMA_VERSION: Keyword = kw!(:db.schema/version);
+    static ref DB_IDENT: Keyword = kw!(:db/ident);
+    static ref DB_UNIQUE: Keyword = kw!(:db/unique);
+    static ref DB_UNIQUE_VALUE: Keyword = kw!(:db.unique/value);
+    static ref DB_UNIQUE_IDENTITY: Keyword = kw!(:db.unique/identity);
+    static ref DB_IS_COMPONENT: Keyword = Keyword::namespaced("db", "isComponent");
+    static ref DB_VALUE_TYPE: Keyword = Keyword::namespaced("db", "valueType");
+    static ref DB_INDEX: Keyword = kw!(:db/index);
+    static ref DB_FULLTEXT: Keyword = kw!(:db/fulltext);
+    static ref DB_CARDINALITY: Keyword = kw!(:db/cardinality);
+    static ref DB_CARDINALITY_ONE: Keyword = kw!(:db.cardinality/one);
+    static ref DB_CARDINALITY_MANY: Keyword = kw!(:db.cardinality/many);
+    static ref DB_NO_HISTORY: Keyword = Keyword::namespaced("db", "noHistory");
 }
 
 trait HasCoreSchema {
@@ -548,7 +548,7 @@ pub trait VersionedStore: HasVocabularies + HasSchema {
                                 // We have two vocabularies with the same name, same version, and
                                 // different definitions for an attribute. That's a coding error.
                                 // We can't accept this vocabulary.
-                                bail!(MentatError::ConflictingAttributeDefinitions(
+                                return Err(MentatError::ConflictingAttributeDefinitions(
                                     definition.name.to_string(),
                                     definition.version,
                                     pair.0.to_string(),
@@ -604,7 +604,7 @@ pub trait VersionedStore: HasVocabularies + HasSchema {
     fn verify_core_schema(&self) -> Result<()> {
         if let Some(core) = self.read_vocabulary_named(&DB_SCHEMA_CORE)? {
             if core.version != CORE_SCHEMA_VERSION {
-                bail!(MentatError::UnexpectedCoreSchema(
+                return Err(MentatError::UnexpectedCoreSchema(
                     CORE_SCHEMA_VERSION,
                     Some(core.version)
                 ));
@@ -613,7 +613,7 @@ pub trait VersionedStore: HasVocabularies + HasSchema {
             // TODO: check things other than the version.
         } else {
             // This would be seriously messed up.
-            bail!(MentatError::UnexpectedCoreSchema(CORE_SCHEMA_VERSION, None));
+            return Err(MentatError::UnexpectedCoreSchema(CORE_SCHEMA_VERSION, None));
         }
         Ok(())
     }
@@ -624,7 +624,7 @@ pub trait VersionedStore: HasVocabularies + HasSchema {
 /// vocabularies — you can retrieve the requested definition and the resulting `VocabularyCheck`
 /// by name.
 pub trait VocabularyStatus {
-    fn get(&self, name: &Keyword) -> Option<(&Definition, &VocabularyCheck)>;
+    fn get<'a>(&'_ self, name: &Keyword) -> Option<(&Definition, &VocabularyCheck<'_>)>;
     fn version(&self, name: &Keyword) -> Option<Version>;
 }
 
@@ -722,7 +722,7 @@ impl<'a, 'c> VersionedStore for InProgress<'a, 'c> {
                     out.insert(definition.name.clone(), VocabularyOutcome::Existed);
                 }
                 VocabularyCheck::PresentButTooNew { newer_version } => {
-                    bail!(MentatError::ExistingVocabularyTooNew(
+                    return Err(MentatError::ExistingVocabularyTooNew(
                         definition.name.to_string(),
                         newer_version.version,
                         definition.version
@@ -906,7 +906,7 @@ where
                         attributes: attributes,
                     }))
                 }
-                Some(_) => bail!(MentatError::InvalidVocabularyVersion),
+                Some(_) => return Err(MentatError::InvalidVocabularyVersion),
             }
         } else {
             Ok(None)
@@ -987,9 +987,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::Store;
-
     use super::HasVocabularies;
+    use crate::Store;
 
     #[test]
     fn test_read_vocabularies() {

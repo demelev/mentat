@@ -8,7 +8,7 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
-// use rusqlite;
+use rusqlite;
 
 use mentat_db::V1_PARTS as BOOTSTRAP_PARTITIONS;
 
@@ -35,7 +35,7 @@ lazy_static! {
 
 pub fn ensure_current_version(tx: &mut rusqlite::Transaction) -> Result<()> {
     for statement in (&SCHEMA_STATEMENTS).iter() {
-        tx.execute(statement, [])?;
+        tx.execute(statement, ())?;
     }
 
     // Initial partition information is what we'd see at bootstrap, and is used during first sync.
@@ -48,7 +48,7 @@ pub fn ensure_current_version(tx: &mut rusqlite::Transaction) -> Result<()> {
 
     tx.execute(
         "INSERT OR IGNORE INTO tolstoy_metadata (key, value) VALUES (?, zeroblob(16))",
-        &[&REMOTE_HEAD_KEY],
+        [&REMOTE_HEAD_KEY],
     )?;
     Ok(())
 }
@@ -58,7 +58,7 @@ pub mod tests {
     use super::*;
     use uuid::Uuid;
 
-    use crate::metadata::{PartitionsTable, SyncMetadata};
+    use metadata::{PartitionsTable, SyncMetadata};
 
     use mentat_db::USER0;
 
@@ -99,7 +99,7 @@ pub mod tests {
         let mut stmt = tx
             .prepare("SELECT key FROM tolstoy_metadata WHERE value = zeroblob(16)")
             .unwrap();
-        let mut keys_iter = stmt.query_map([], |r| r.get(0)).expect("query works");
+        let mut keys_iter = stmt.query_map((), |r| r.get(0)).expect("query works");
 
         let first: Result<String> = keys_iter.next().unwrap().map_err(|e| e.into());
         let second: Option<_> = keys_iter.next();
@@ -159,12 +159,12 @@ pub mod tests {
         let mut stmt = tx.prepare("SELECT value FROM tolstoy_metadata").unwrap();
         let mut values_iter = stmt
             .query_map([], |r| {
-                let raw_uuid: [u8; 16] = r.get(0)?;
-                Uuid::from_bytes(&raw_uuid).map_err(|err| {
+                let raw_uuid: Vec<u8> = r.get(0)?;
+                Uuid::from_bytes(raw_uuid.as_slice()).map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        16,
+                        0,
                         rusqlite::types::Type::Blob,
-                        Box::new(err),
+                        Box::new(e),
                     )
                 })
             })

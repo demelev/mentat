@@ -2,6 +2,7 @@
 name = "query_projector_traits"
 version = "0.0.1"
 workspace = ".."
+edition = "2024"
 
 [lib]
 name = "query_projector_traits"
@@ -10,12 +11,11 @@ path = "lib.rs"
 [features]
 sqlcipher = ["rusqlite/sqlcipher"]
 
-[dependencies]
-failure = "0.1.1"
-failure_derive = "0.1.1"
+[dependencies.thiserror]
+workspace = true
 
 [dependencies.rusqlite]
-version = "0.36"
+workspace = true
 features = ["limits"]
 
 [dependencies.edn]

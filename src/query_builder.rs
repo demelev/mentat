@@ -27,7 +27,7 @@ pub struct QueryBuilder<'a> {
 }
 
 impl<'a> QueryBuilder<'a> {
-    pub fn new<T>(store: &'a mut Store, query: T) -> QueryBuilder
+    pub fn new<T>(store: &'a mut Store, query: T) -> QueryBuilder<'a>
     where
         T: Into<String>,
     {
@@ -424,7 +424,7 @@ mod test {
             entid: i64,
             boolean: bool,
             long_val: i64,
-        };
+        }
 
         let mut results: Vec<Res> = QueryBuilder::new(
             &mut store,

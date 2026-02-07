@@ -10,18 +10,15 @@
 
 #![allow(dead_code)]
 
-use failure::ResultExt;
-
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::iter::{once, repeat};
 use std::ops::Range;
 use std::path::Path;
-use std::sync::Once;
 
-// use itertools;
+use itertools;
 use itertools::Itertools;
-// use rusqlite;
+use rusqlite;
 use rusqlite::limits::Limit;
 use rusqlite::types::{ToSql, ToSqlOutput};
 use rusqlite::TransactionBehavior;
@@ -45,8 +42,6 @@ use tx::transact;
 use types::{AVMap, AVPair, Partition, PartitionMap, DB};
 
 use watcher::NullWatcher;
-
-static START: Once = Once::new();
 
 // In PRAGMA foo='bar', `'bar'` must be a constant string (it cannot be a
 // bound parameter), so we need to escape manually. According to
@@ -166,9 +161,10 @@ fn to_bool_ref(x: bool) -> &'static bool {
     }
 }
 
-/// SQL statements to be executed, in order, to create the Mentat SQL schema (version 1).
+lazy_static! {
+    /// SQL statements to be executed, in order, to create the Mentat SQL schema (version 1).
     #[cfg_attr(rustfmt, rustfmt_skip)]
-    const V1_STATEMENTS: [&'static str; 21] = [
+    static ref V1_STATEMENTS: Vec<&'static str> = { vec![
         r#"CREATE TABLE datoms (e INTEGER NOT NULL, a SMALLINT NOT NULL, v BLOB NOT NULL, tx INTEGER NOT NULL,
                                 value_type_tag SMALLINT NOT NULL,
                                 index_avet TINYINT NOT NULL DEFAULT 0, index_vaet TINYINT NOT NULL DEFAULT 0,
@@ -249,15 +245,17 @@ fn to_bool_ref(x: bool) -> &'static bool {
 
         // TODO: store entid instead of ident for partition name.
         r#"CREATE TABLE known_parts (part TEXT NOT NULL PRIMARY KEY, start INTEGER NOT NULL, end INTEGER NOT NULL, allow_excision SMALLINT NOT NULL)"#,
-        ];
+        ]
+    };
+}
 
 /// Set the SQLite user version.
 ///
 /// Mentat manages its own SQL schema version using the user version.  See the [SQLite
 /// documentation](https://www.sqlite.org/pragma.html#pragma_user_version).
 fn set_user_version(conn: &rusqlite::Connection, version: i32) -> Result<()> {
-    conn.execute(&format!("PRAGMA user_version = {}", version), [])
-        .context(DbErrorKind::CouldNotSetVersionPragma)?;
+    conn.execute(&format!("PRAGMA user_version = {}", version), ())
+        .map_err(|_| DbErrorKind::CouldNotSetVersionPragma)?;
     Ok(())
 }
 
@@ -267,8 +265,8 @@ fn set_user_version(conn: &rusqlite::Connection, version: i32) -> Result<()> {
 /// documentation](https://www.sqlite.org/pragma.html#pragma_user_version).
 fn get_user_version(conn: &rusqlite::Connection) -> Result<i32> {
     let v = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .context(DbErrorKind::CouldNotGetVersionPragma)?;
+        .query_row("PRAGMA user_version", (), |row| row.get(0))
+        .map_err(|_| DbErrorKind::CouldNotGetVersionPragma)?;
     Ok(v)
 }
 
@@ -279,7 +277,7 @@ pub fn create_empty_current_version(
     let tx = conn.transaction_with_behavior(TransactionBehavior::Exclusive)?;
 
     for statement in (&V1_STATEMENTS).iter() {
-        tx.execute(statement, [])?;
+        tx.execute(statement, ())?;
     }
 
     set_user_version(&tx, CURRENT_VERSION)?;
@@ -295,7 +293,7 @@ pub fn create_empty_current_version(
 fn create_current_partition_view(conn: &rusqlite::Connection) -> Result<()> {
     let mut stmt = conn.prepare("SELECT part, end FROM known_parts ORDER BY end ASC")?;
     let known_parts: Result<Vec<(String, i64)>> = stmt
-        .query_and_then([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .query_and_then((), |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect();
 
     let mut case = vec![];
@@ -314,7 +312,7 @@ fn create_current_partition_view(conn: &rusqlite::Connection) -> Result<()> {
         ::TIMELINE_MAIN
     );
 
-    conn.execute(&view_stmt, [])?;
+    conn.execute(&view_stmt, ())?;
     Ok(())
 }
 
@@ -456,15 +454,33 @@ impl TypedSQLValue for TypedValue {
     /// Return the corresponding SQLite `value` and `value_type_tag` pair.
     fn to_sql_value_pair<'a>(&'a self) -> (ToSqlOutput<'a>, i32) {
         match self {
-            &TypedValue::Ref(x) => (x.into(), 0),
-            &TypedValue::Boolean(x) => ((if x { 1 } else { 0 }).into(), 1),
-            &TypedValue::Instant(x) => (x.to_micros().into(), 4),
+            &TypedValue::Ref(x) => (ToSqlOutput::Owned(rusqlite::types::Value::Integer(x)), 0),
+            &TypedValue::Boolean(x) => (
+                ToSqlOutput::Owned(rusqlite::types::Value::Integer(if x { 1 } else { 0 })),
+                1,
+            ),
+            &TypedValue::Instant(x) => (
+                ToSqlOutput::Owned(rusqlite::types::Value::Integer(x.to_micros())),
+                4,
+            ),
             // SQLite distinguishes integral from decimal types, allowing long and double to share a tag.
-            &TypedValue::Long(x) => (x.into(), 5),
-            &TypedValue::Double(x) => (x.into_inner().into(), 5),
-            &TypedValue::String(ref x) => (x.as_str().into(), 10),
-            &TypedValue::Uuid(ref u) => (u.as_bytes().to_vec().into(), 11),
-            &TypedValue::Keyword(ref x) => (x.to_string().into(), 13),
+            &TypedValue::Long(x) => (ToSqlOutput::Owned(rusqlite::types::Value::Integer(x)), 5),
+            &TypedValue::Double(x) => (
+                ToSqlOutput::Owned(rusqlite::types::Value::Real(x.into_inner())),
+                5,
+            ),
+            &TypedValue::String(ref x) => (
+                ToSqlOutput::Borrowed(rusqlite::types::ValueRef::Text(x.as_bytes())),
+                10,
+            ),
+            &TypedValue::Uuid(ref u) => (
+                ToSqlOutput::Owned(rusqlite::types::Value::Blob(u.as_bytes().to_vec())),
+                11,
+            ),
+            TypedValue::Keyword(ref x) => {
+                let s = x.to_string();
+                (ToSqlOutput::Owned(rusqlite::types::Value::Text(s)), 13)
+            }
         }
     }
 
@@ -491,7 +507,7 @@ pub(crate) fn read_materialized_view(
 ) -> Result<Vec<(Entid, Entid, TypedValue)>> {
     let mut stmt: rusqlite::Statement =
         conn.prepare(format!("SELECT e, a, v, value_type_tag FROM {}", table).as_str())?;
-    let m: Result<Vec<_>> = stmt.query_and_then([], row_to_datom_assertion)?.collect();
+    let m: Result<Vec<_>> = stmt.query_and_then((), row_to_datom_assertion)?.collect();
     m
 }
 
@@ -532,7 +548,7 @@ pub fn read_partition_map(conn: &rusqlite::Connection) -> Result<PartitionMap> {
             part NOT IN (SELECT part FROM parts)",
     )?;
     let m = stmt
-        .query_and_then([], |row| -> Result<(String, Partition)> {
+        .query_and_then((), |row| -> Result<(String, Partition)> {
             Ok((
                 row.get(0)?,
                 Partition::new(row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?),
@@ -660,7 +676,7 @@ fn search(conn: &rusqlite::Connection) -> Result<()> {
          t.a0 = d.a"#;
 
     let mut stmt = conn.prepare_cached(s)?;
-    stmt.execute([]).context(DbErrorKind::CouldNotSearch)?;
+    stmt.execute(()).map_err(|_| DbErrorKind::CouldNotSearch)?;
     Ok(())
 }
 
@@ -683,8 +699,8 @@ fn insert_transaction(conn: &rusqlite::Connection, tx: Entid) -> Result<()> {
       WHERE added0 IS 1 AND ((rid IS NULL) OR ((rid IS NOT NULL) AND (v0 IS NOT v)))"#;
 
     let mut stmt = conn.prepare_cached(s)?;
-    stmt.execute(&[&tx])
-        .context(DbErrorKind::TxInsertFailedToAddMissingDatoms)?;
+    stmt.execute([&tx])
+        .map_err(|_| DbErrorKind::TxInsertFailedToAddMissingDatoms)?;
 
     let s = r#"
       INSERT INTO timelined_transactions (e, a, v, tx, added, value_type_tag)
@@ -695,8 +711,8 @@ fn insert_transaction(conn: &rusqlite::Connection, tx: Entid) -> Result<()> {
              (added0 IS 1 AND search_type IS ':db.cardinality/one' AND v0 IS NOT v))"#;
 
     let mut stmt = conn.prepare_cached(s)?;
-    stmt.execute(&[&tx])
-        .context(DbErrorKind::TxInsertFailedToRetractDatoms)?;
+    stmt.execute([&tx])
+        .map_err(|_| DbErrorKind::TxInsertFailedToRetractDatoms)?;
 
     Ok(())
 }
@@ -718,8 +734,8 @@ fn update_datoms(conn: &rusqlite::Connection, tx: Entid) -> Result<()> {
         DELETE FROM datoms WHERE rowid IN ids"#;
 
     let mut stmt = conn.prepare_cached(s)?;
-    stmt.execute([])
-        .context(DbErrorKind::DatomsUpdateFailedToRetract)?;
+    stmt.execute(())
+        .map_err(|_| DbErrorKind::DatomsUpdateFailedToRetract)?;
 
     // Insert datoms that were added and not already present. We also must expand our bitfield into
     // flags.  Since Mentat follows Datomic and treats its input as a set, it is okay to transact
@@ -744,8 +760,8 @@ fn update_datoms(conn: &rusqlite::Connection, tx: Entid) -> Result<()> {
     );
 
     let mut stmt = conn.prepare_cached(&s)?;
-    stmt.execute(&[&tx])
-        .context(DbErrorKind::DatomsUpdateFailedToAdd)?;
+    stmt.execute([&tx])
+        .map_err(|_| DbErrorKind::DatomsUpdateFailedToAdd)?;
     Ok(())
 }
 
@@ -777,12 +793,12 @@ impl MentatStoring for rusqlite::Connection {
             }).collect();
 
             // `params` reference computed values in `block`.
-            let params: Vec<&dyn ToSql> = block.iter().flat_map(|&(ref searchid, ref a, ref value, ref value_type_tag)| {
+            let params: Vec<&ToSql> = block.iter().flat_map(|&(ref searchid, ref a, ref value, ref value_type_tag)| {
                 // Avoid inner heap allocation.
-                once(searchid as &dyn ToSql)
-                    .chain(once(a as &dyn ToSql)
-                           .chain(once(value as &dyn ToSql)
-                                  .chain(once(value_type_tag as &dyn ToSql))))
+                once(searchid as &ToSql)
+                    .chain(once(a as &ToSql)
+                           .chain(once(value as &ToSql)
+                                  .chain(once(value_type_tag as &ToSql))))
             }).collect();
 
             // TODO: cache these statements for selected values of `count`.
@@ -799,7 +815,7 @@ impl MentatStoring for rusqlite::Connection {
                                     values);
             let mut stmt: rusqlite::Statement = self.prepare(s.as_str())?;
 
-            let m: Result<Vec<(i64, Entid)>> = stmt.query_and_then(&params[..], |row| -> Result<(i64, Entid)> {
+            let m: Result<Vec<(i64, Entid)>> = stmt.query_and_then(rusqlite::params_from_iter(params.iter()), |row| -> Result<(i64, Entid)> {
                 Ok((row.get(0)?, row.get(1)?))
             })?.collect();
             m
@@ -874,8 +890,8 @@ impl MentatStoring for rusqlite::Connection {
 
         for statement in &statements {
             let mut stmt = self.prepare_cached(statement)?;
-            stmt.execute([])
-                .context(DbErrorKind::FailedToCreateTempTables)?;
+            stmt.execute(())
+                .map_err(|_| DbErrorKind::FailedToCreateTempTables)?;
         }
 
         Ok(())
@@ -920,15 +936,15 @@ impl MentatStoring for rusqlite::Connection {
             let block = block?;
 
             // `params` reference computed values in `block`.
-            let params: Vec<&dyn ToSql> = block.iter().flat_map(|&(ref e, ref a, ref value, ref value_type_tag, added, ref flags)| {
+            let params: Vec<&ToSql> = block.iter().flat_map(|&(ref e, ref a, ref value, ref value_type_tag, added, ref flags)| {
                 // Avoid inner heap allocation.
                 // TODO: extract some finite length iterator to make this less indented!
-                once(e as &dyn ToSql)
-                    .chain(once(a as &dyn ToSql)
-                           .chain(once(value as &dyn ToSql)
-                                  .chain(once(value_type_tag as &dyn ToSql)
-                                         .chain(once(to_bool_ref(added) as &dyn ToSql)
-                                                .chain(once(flags as &dyn ToSql))))))
+                once(e as &ToSql)
+                    .chain(once(a as &ToSql)
+                           .chain(once(value as &ToSql)
+                                  .chain(once(value_type_tag as &ToSql)
+                                         .chain(once(to_bool_ref(added) as &ToSql)
+                                                .chain(once(flags as &ToSql))))))
             }).collect();
 
             // TODO: cache this for selected values of count.
@@ -943,8 +959,8 @@ impl MentatStoring for rusqlite::Connection {
 
             // TODO: consider ensuring we inserted the expected number of rows.
             let mut stmt = self.prepare_cached(s.as_str())?;
-            stmt.execute(&params[..])
-                .context(DbErrorKind::NonFtsInsertionIntoTempSearchTableFailed)
+            stmt.execute(rusqlite::params_from_iter(params.iter()))
+                .map_err(|_| DbErrorKind::NonFtsInsertionIntoTempSearchTableFailed)
                 .map_err(|e| e.into())
                 .map(|_c| ())
         }).collect::<Result<Vec<()>>>();
@@ -1020,15 +1036,15 @@ impl MentatStoring for rusqlite::Connection {
 
             // First, insert all fulltext string values.
             // `fts_params` reference computed values in `block`.
-            let fts_params: Vec<&dyn ToSql> =
+            let fts_params: Vec<&ToSql> =
                 block.iter()
                      .filter(|&&(ref _e, ref _a, ref value, ref _value_type_tag, _added, ref _flags, ref _searchid)| {
                          value.is_some()
                      })
                      .flat_map(|&(ref _e, ref _a, ref value, ref _value_type_tag, _added, ref _flags, ref searchid)| {
                          // Avoid inner heap allocation.
-                         once(value as &dyn ToSql)
-                             .chain(once(searchid as &dyn ToSql))
+                         once(value as &ToSql)
+                             .chain(once(searchid as &ToSql))
                      }).collect();
 
             // TODO: make this maximally efficient. It's not terribly inefficient right now.
@@ -1037,19 +1053,19 @@ impl MentatStoring for rusqlite::Connection {
 
             // TODO: consider ensuring we inserted the expected number of rows.
             let mut stmt = self.prepare_cached(fts_s.as_str())?;
-            stmt.execute(&fts_params[..]).context(DbErrorKind::FtsInsertionFailed)?;
+            stmt.execute(rusqlite::params_from_iter(fts_params.iter())).map_err(|_| DbErrorKind::FtsInsertionFailed)?;
 
             // Second, insert searches.
             // `params` reference computed values in `block`.
-            let params: Vec<&dyn ToSql> = block.iter().flat_map(|&(ref e, ref a, ref _value, ref value_type_tag, added, ref flags, ref searchid)| {
+            let params: Vec<&ToSql> = block.iter().flat_map(|&(ref e, ref a, ref _value, ref value_type_tag, added, ref flags, ref searchid)| {
                 // Avoid inner heap allocation.
                 // TODO: extract some finite length iterator to make this less indented!
-                once(e as &dyn ToSql)
-                    .chain(once(a as &dyn ToSql)
-                           .chain(once(searchid as &dyn ToSql)
-                                  .chain(once(value_type_tag as &dyn ToSql)
-                                         .chain(once(to_bool_ref(added) as &dyn ToSql)
-                                                .chain(once(flags as &dyn ToSql))))))
+                once(e as &ToSql)
+                    .chain(once(a as &ToSql)
+                           .chain(once(searchid as &ToSql)
+                                  .chain(once(value_type_tag as &ToSql)
+                                         .chain(once(to_bool_ref(added) as &ToSql)
+                                                .chain(once(flags as &ToSql))))))
             }).collect();
 
             // TODO: cache this for selected values of count.
@@ -1065,7 +1081,7 @@ impl MentatStoring for rusqlite::Connection {
 
             // TODO: consider ensuring we inserted the expected number of rows.
             let mut stmt = self.prepare_cached(s.as_str())?;
-            stmt.execute(&params[..]).context(DbErrorKind::FtsInsertionIntoTempSearchTableFailed)
+            stmt.execute(rusqlite::params_from_iter(params.iter())).map_err(|_| DbErrorKind::FtsInsertionIntoTempSearchTableFailed)
                 .map_err(|e| e.into())
                 .map(|_c| ())
         }).collect::<Result<Vec<()>>>();
@@ -1074,8 +1090,8 @@ impl MentatStoring for rusqlite::Connection {
         let mut stmt = self.prepare_cached(
             "UPDATE fulltext_values SET searchid = NULL WHERE searchid IS NOT NULL",
         )?;
-        stmt.execute([])
-            .context(DbErrorKind::FtsFailedToDropSearchIds)?;
+        stmt.execute(())
+            .map_err(|_| DbErrorKind::FtsFailedToDropSearchIds)?;
         results.map(|_| ())
     }
 
@@ -1115,7 +1131,7 @@ impl MentatStoring for rusqlite::Connection {
 
         let mut stmt = self.prepare_cached(&sql_stmt)?;
         let m: Result<Vec<_>> = stmt
-            .query_and_then([], row_to_transaction_assertion)?
+            .query_and_then((), row_to_transaction_assertion)?
             .collect();
         m
     }
@@ -1137,7 +1153,7 @@ pub fn committed_metadata_assertions(
 
     let mut stmt = conn.prepare_cached(&sql_stmt)?;
     let m: Result<Vec<_>> = stmt
-        .query_and_then(&[&tx_id as &dyn ToSql], row_to_transaction_assertion)?
+        .query_and_then(&[&tx_id as &ToSql], row_to_transaction_assertion)?
         .collect();
     m
 }
@@ -1179,14 +1195,14 @@ pub fn update_metadata(
     // TODO: use concat! to avoid creating String instances.
     if !metadata_report.idents_altered.is_empty() {
         // Idents is the materialized view of the [entid :db/ident ident] slice of datoms.
-        conn.execute(format!("DELETE FROM idents").as_str(), [])?;
+        conn.execute(format!("DELETE FROM idents").as_str(), ())?;
         conn.execute(
             format!(
                 "INSERT INTO idents SELECT e, a, v, value_type_tag FROM datoms WHERE a IN {}",
                 entids::IDENTS_SQL_LIST.as_str()
             )
             .as_str(),
-            [],
+            (),
         )?;
     }
 
@@ -1201,7 +1217,7 @@ pub fn update_metadata(
         || !metadata_report.attributes_altered.is_empty()
         || !metadata_report.idents_altered.is_empty()
     {
-        conn.execute(format!("DELETE FROM schema").as_str(), [])?;
+        conn.execute(format!("DELETE FROM schema").as_str(), ())?;
         // NB: we're using :db/valueType as a placeholder for the entire schema-defining set.
         let s = format!(
             r#"
@@ -1214,7 +1230,7 @@ pub fn update_metadata(
             entids::DB_VALUE_TYPE,
             entids::SCHEMA_SQL_LIST.as_str()
         );
-        conn.execute(&s, [])?;
+        conn.execute(&s, ())?;
     }
 
     let mut index_stmt = conn.prepare("UPDATE datoms SET index_avet = ? WHERE a = ?")?;
@@ -1237,16 +1253,13 @@ SELECT EXISTS
             match alteration {
                 &Index => {
                     // This should always succeed.
-                    index_stmt.execute(&[&attribute.index, &entid as &dyn ToSql])?;
+                    index_stmt.execute([&attribute.index, &entid as &ToSql])?;
                 }
                 &Unique => {
                     // TODO: This can fail if there are conflicting values; give a more helpful
                     // error message in this case.
                     if unique_value_stmt
-                        .execute(&[
-                            to_bool_ref(attribute.unique.is_some()),
-                            &entid as &dyn ToSql,
-                        ])
+                        .execute([to_bool_ref(attribute.unique.is_some()), &entid as &ToSql])
                         .is_err()
                     {
                         match attribute.unique {
@@ -1273,7 +1286,7 @@ SELECT EXISTS
                     // TODO: improve the failure message.  Perhaps try to mimic what Datomic says in
                     // this case?
                     if !attribute.multival {
-                        let mut rows = cardinality_stmt.query(&[&entid as &dyn ToSql])?;
+                        let mut rows = cardinality_stmt.query(&[&entid as &ToSql])?;
                         if rows.next()?.is_some() {
                             bail!(DbErrorKind::SchemaAlterationFailed(format!(
                                 "Cannot alter schema attribute {} to be :db.cardinality/one",
@@ -1317,7 +1330,7 @@ impl PartitionMap {
 
 #[cfg(test)]
 mod tests {
-    // extern crate env_logger;
+    extern crate env_logger;
 
     use std::borrow::Borrow;
 
@@ -3244,7 +3257,7 @@ mod tests {
 
         let report = conn.transact_simple_terms(terms, InternSet::new());
 
-        match report.err().map(|e| e.kind()) {
+        match report.err() {
             Some(DbErrorKind::SchemaConstraintViolation(
                 errors::SchemaConstraintViolation::TypeDisagreements {
                     ref conflicting_datoms,

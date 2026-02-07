@@ -10,6 +10,9 @@
 
 #![allow(dead_code)]
 
+#[cfg(feature = "entity")]
+use mentat_entity::Entity;
+
 use std::collections::BTreeMap;
 
 use std::sync::Arc;
@@ -52,7 +55,7 @@ impl Store {
         let mut connection = crate::new_connection(path)?;
         let conn = Conn::connect(&mut connection)?;
         Ok(Store {
-            conn,
+            conn: conn,
             sqlite: connection,
         })
     }
@@ -171,6 +174,51 @@ impl Store {
     }
 }
 
+#[cfg(feature = "entity")]
+/// Helper extension trait for tests - adds ensure_entity_schema to Store
+pub trait StoreExt {
+    fn ensure_entity_schema<T: Entity>(&mut self) -> Result<()>;
+}
+
+pub trait Connectable {
+    fn conn(&self) -> &Conn;
+    fn begin_transaction<'m>(&'m mut self) -> Result<InProgress<'m, 'm>>;
+}
+
+impl Connectable for Store {
+    fn conn(&self) -> &Conn {
+        &self.conn
+    }
+    fn begin_transaction<'m>(&'m mut self) -> Result<InProgress<'m, 'm>> {
+        self.conn.begin_transaction(&mut self.sqlite)
+    }
+}
+
+#[cfg(feature = "entity")]
+impl<C: Connectable> StoreExt for C {
+    fn ensure_entity_schema<T: Entity>(&mut self) -> Result<()> {
+        use mentat_core::HasSchema;
+
+        let entity_schema = T::schema();
+        let current_schema = self.conn().current_schema();
+
+        // Check if all attributes for this entity already exist
+        let all_exist = entity_schema
+            .fields
+            .iter()
+            .all(|field| current_schema.identifies_attribute(&field.ident));
+
+        if !all_exist {
+            // Transact the schema
+            let mut in_progress = self.begin_transaction()?;
+            mentat_entity::transact_schema::<T>(&mut in_progress)?;
+            in_progress.commit()?;
+        }
+
+        Ok(())
+    }
+}
+
 impl Queryable for Store {
     fn q_once<T>(&self, query: &str, inputs: T) -> Result<QueryOutput>
     where
@@ -179,7 +227,7 @@ impl Queryable for Store {
         self.conn.q_once(&self.sqlite, query, inputs)
     }
 
-    fn q_prepare<T>(&self, query: &str, inputs: T) -> PreparedResult
+    fn q_prepare<T>(&'_ self, query: &str, inputs: T) -> PreparedResult<'_>
     where
         T: Into<Option<QueryInputs>>,
     {
@@ -245,14 +293,13 @@ impl Pullable for Store {
 mod tests {
     use super::*;
 
-    extern crate time;
-
+    use time;
     use uuid::Uuid;
 
     use std::collections::BTreeSet;
     use std::path::{Path, PathBuf};
-    use std::sync::mpsc;
     use std::sync::Mutex;
+    use std::sync::mpsc;
     use std::time::Duration;
 
     use mentat_db::cache::SQLiteAttributeCache;
@@ -438,18 +485,24 @@ mod tests {
                 assert!(in_progress.cache.is_attribute_cached_reverse(foo_baz));
                 assert!(in_progress.cache.is_attribute_cached_forward(foo_x));
 
-                assert!(in_progress
-                    .cache
-                    .overlay
-                    .is_attribute_cached_reverse(foo_bar));
-                assert!(in_progress
-                    .cache
-                    .overlay
-                    .is_attribute_cached_forward(foo_baz));
-                assert!(in_progress
-                    .cache
-                    .overlay
-                    .is_attribute_cached_reverse(foo_baz));
+                assert!(
+                    in_progress
+                        .cache
+                        .overlay
+                        .is_attribute_cached_reverse(foo_bar)
+                );
+                assert!(
+                    in_progress
+                        .cache
+                        .overlay
+                        .is_attribute_cached_forward(foo_baz)
+                );
+                assert!(
+                    in_progress
+                        .cache
+                        .overlay
+                        .is_attribute_cached_reverse(foo_baz)
+                );
                 assert!(in_progress.cache.overlay.is_attribute_cached_forward(foo_x));
             }
 
