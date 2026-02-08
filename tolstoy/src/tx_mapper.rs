@@ -23,7 +23,7 @@ use tolstoy_traits::errors::{
     TolstoyError,
 };
 
-use types::{
+use crate::types::{
     LocalGlobalTxMapping,
 };
 

@@ -24,7 +24,7 @@ use public_traits::errors::{
     Result,
 };
 
-use types::{
+use crate::types::{
     TxPart,
 };
 

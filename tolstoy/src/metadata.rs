@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use core_traits::Entid;
 
-use schema;
+use crate::schema;
 
 use public_traits::errors::Result;
 
@@ -23,9 +23,9 @@ use tolstoy_traits::errors::TolstoyError;
 
 use mentat_db::{db, Partition, PartitionMap};
 
-use types::LocalGlobalTxMapping;
+use crate::types::LocalGlobalTxMapping;
 
-use TxMapper;
+use crate::TxMapper;
 
 // Could be Copy, but that might change
 pub struct SyncMetadata {

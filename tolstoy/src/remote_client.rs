@@ -12,8 +12,8 @@
 
 use std;
 
-use futures::{executor::block_on, Future, Stream};
-use reqwest::{IntoUrl, StatusCode, Url};
+use futures::executor::block_on;
+use reqwest::{StatusCode, Url};
 // TODO: enable TLS support; hurdle is cross-compiling openssl for Android.
 // See https://github.com/mozilla/mentat/issues/569
 // use hyper_tls;
