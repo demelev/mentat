@@ -96,7 +96,7 @@ lazy_static! {
         ]
     };
 
-    static ref V1_CORE_SCHEMA: [(symbols::Keyword); 16] = {
+    static ref V1_CORE_SCHEMA: [symbols::Keyword; 16] = {
             [(ns_keyword!("db", "ident")),
              (ns_keyword!("db.install", "partition")),
              (ns_keyword!("db.install", "valueType")),

@@ -100,7 +100,7 @@ impl Store {
     /// supplied. Fails unless linked against sqlcipher (or something else that
     /// supports the Sqlite Encryption Extension).
     pub fn open_with_key(path: &str, encryption_key: &str) -> Result<Store> {
-        let mut connection = ::new_connection_with_key(path, encryption_key)?;
+        let mut connection = crate::new_connection_with_key(path, encryption_key)?;
         let conn = Conn::connect(&mut connection)?;
         Ok(Store {
             conn: conn,
@@ -112,7 +112,7 @@ impl Store {
     /// rekey`). Fails unless linked against sqlcipher (or something else that supports the Sqlite
     /// Encryption Extension).
     pub fn change_encryption_key(&mut self, new_encryption_key: &str) -> Result<()> {
-        ::change_encryption_key(&self.sqlite, new_encryption_key)?;
+        crate::change_encryption_key(&self.sqlite, new_encryption_key)?;
         Ok(())
     }
 }

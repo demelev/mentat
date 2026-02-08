@@ -893,7 +893,7 @@ impl AttributeCaches {
         let is_fulltext = schema.attribute_for_entid(attribute).map_or(false, |s| s.fulltext);
         let table = if is_fulltext { "fulltext_datoms" } else { "datoms" };
         let sql = format!("SELECT a, e, v, value_type_tag FROM {} WHERE a = ? ORDER BY a ASC, e ASC", table);
-        let args: Vec<&rusqlite::types::ToSql> = vec![&attribute];
+        let args: Vec<&dyn rusqlite::types::ToSql> = vec![&attribute];
         let mut stmt = sqlite.prepare(&sql).map_err(|_| DbErrorKind::CacheUpdateFailed)?;
         let replacing = true;
         self.repopulate_from_aevt(schema, &mut stmt, args, replacing)
@@ -902,7 +902,7 @@ impl AttributeCaches {
     fn repopulate_from_aevt<'a, 's, 'c, 'v>(&'a mut self,
                                             schema: &'s Schema,
                                             statement: &'c mut rusqlite::Statement,
-                                            args: Vec<&'v rusqlite::types::ToSql>,
+                                            args: Vec<&'v dyn rusqlite::types::ToSql>,
                                             replacing: bool) -> Result<()> {
         let mut aev_factory = AevFactory::new();
         let rows = statement.query_map(rusqlite::params_from_iter(args.iter()), |row| Ok(aev_factory.row_to_aev(row)))?;
@@ -1029,16 +1029,16 @@ impl AttributeCaches {
     /// Return a reference to the cache for the provided `a`, if `a` names an attribute that is
     /// cached in the forward direction. If `a` doesn't name an attribute, or it's not cached at
     /// all, or it's only cached in reverse (`v` to `e`, not `e` to `v`), `None` is returned.
-    pub fn forward_attribute_cache_for_attribute<'a, 's>(&'a self, schema: &'s Schema, a: Entid) -> Option<&'a AttributeCache> {
+    pub fn forward_attribute_cache_for_attribute<'a, 's>(&'a self, schema: &'s Schema, a: Entid) -> Option<&'a dyn AttributeCache> {
         if !self.forward_cached_attributes.contains(&a) {
             return None;
         }
         schema.attribute_for_entid(a)
               .and_then(|attr|
                 if attr.multival {
-                    self.multi_vals.get(&a).map(|v| v as &AttributeCache)
+                    self.multi_vals.get(&a).map(|v| v as &dyn AttributeCache)
                 } else {
-                    self.single_vals.get(&a).map(|v| v as &AttributeCache)
+                    self.single_vals.get(&a).map(|v| v as &dyn AttributeCache)
                 })
     }
 

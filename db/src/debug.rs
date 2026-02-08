@@ -292,7 +292,7 @@ pub fn fulltext_values(conn: &rusqlite::Connection) -> Result<FulltextValues> {
 ///
 /// The query is printed followed by a newline, then the returned columns followed by a newline, and
 /// then the data rows and columns.  All columns are aligned.
-pub fn dump_sql_query(conn: &rusqlite::Connection, sql: &str, params: &[&ToSql]) -> Result<String> {
+pub fn dump_sql_query(conn: &rusqlite::Connection, sql: &str, params: &[&dyn ToSql]) -> Result<String> {
     let mut stmt: rusqlite::Statement = conn.prepare(sql)?;
 
     let mut tw = TabWriter::new(Vec::new()).padding(2);
