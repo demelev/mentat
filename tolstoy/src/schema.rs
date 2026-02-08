@@ -58,7 +58,7 @@ pub mod tests {
     use super::*;
     use uuid::Uuid;
 
-    use metadata::{PartitionsTable, SyncMetadata};
+    use crate::metadata::{PartitionsTable, SyncMetadata};
 
     use mentat_db::USER0;
 

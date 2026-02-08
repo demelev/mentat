@@ -101,7 +101,7 @@ impl TxMapper {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use schema;
+    use crate::schema;
 
     #[test]
     fn test_getters() {
