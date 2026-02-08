@@ -50,7 +50,7 @@ use types::{
 use watcher::TransactWatcher;
 
 pub struct TxObserver {
-    notify_fn: Arc<Box<Fn(&str, IndexMap<&Entid, &AttributeSet>) + Send + Sync>>,
+    notify_fn: Arc<Box<dyn Fn(&str, IndexMap<&Entid, &AttributeSet>) + Send + Sync>>,
     attributes: AttributeSet,
 }
 
@@ -106,7 +106,7 @@ impl Command for TxCommand {
 
 pub struct TxObservationService {
     observers: Arc<IndexMap<String, Arc<TxObserver>>>,
-    executor: Option<Sender<Box<Command + Send>>>,
+    executor: Option<Sender<Box<dyn Command + Send>>>,
 }
 
 impl TxObservationService {
@@ -141,7 +141,7 @@ impl TxObservationService {
         }
 
         let executor = self.executor.get_or_insert_with(|| {
-            let (tx, rx): (Sender<Box<Command + Send>>, Receiver<Box<Command + Send>>) = channel();
+            let (tx, rx): (Sender<Box<dyn Command + Send>>, Receiver<Box<dyn Command + Send>>) = channel();
             let mut worker = CommandExecutor::new(rx);
 
             thread::spawn(move || {
@@ -189,11 +189,11 @@ impl TransactWatcher for InProgressObserverTransactWatcher {
 }
 
 struct CommandExecutor {
-    receiver: Receiver<Box<Command + Send>>,
+    receiver: Receiver<Box<dyn Command + Send>>,
 }
 
 impl CommandExecutor {
-    fn new(rx: Receiver<Box<Command + Send>>) -> Self {
+    fn new(rx: Receiver<Box<dyn Command + Send>>) -> Self {
         CommandExecutor {
             receiver: rx,
         }

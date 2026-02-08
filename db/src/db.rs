@@ -273,7 +273,7 @@ fn get_user_version(conn: &rusqlite::Connection) -> Result<i32> {
 /// Do just enough work that either `create_current_version` or sync can populate the DB.
 pub fn create_empty_current_version(
     conn: &mut rusqlite::Connection,
-) -> Result<(rusqlite::Transaction, DB)> {
+) -> Result<(rusqlite::Transaction<'_>, DB)> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Exclusive)?;
 
     for statement in (&V1_STATEMENTS).iter() {
@@ -793,12 +793,12 @@ impl MentatStoring for rusqlite::Connection {
             }).collect();
 
             // `params` reference computed values in `block`.
-            let params: Vec<&ToSql> = block.iter().flat_map(|&(ref searchid, ref a, ref value, ref value_type_tag)| {
+            let params: Vec<&dyn ToSql> = block.iter().flat_map(|&(ref searchid, ref a, ref value, ref value_type_tag)| {
                 // Avoid inner heap allocation.
-                once(searchid as &ToSql)
-                    .chain(once(a as &ToSql)
-                           .chain(once(value as &ToSql)
-                                  .chain(once(value_type_tag as &ToSql))))
+                once(searchid as &dyn ToSql)
+                    .chain(once(a as &dyn ToSql)
+                           .chain(once(value as &dyn ToSql)
+                                  .chain(once(value_type_tag as &dyn ToSql))))
             }).collect();
 
             // TODO: cache these statements for selected values of `count`.
@@ -936,15 +936,15 @@ impl MentatStoring for rusqlite::Connection {
             let block = block?;
 
             // `params` reference computed values in `block`.
-            let params: Vec<&ToSql> = block.iter().flat_map(|&(ref e, ref a, ref value, ref value_type_tag, added, ref flags)| {
+            let params: Vec<&dyn ToSql> = block.iter().flat_map(|&(ref e, ref a, ref value, ref value_type_tag, added, ref flags)| {
                 // Avoid inner heap allocation.
                 // TODO: extract some finite length iterator to make this less indented!
-                once(e as &ToSql)
-                    .chain(once(a as &ToSql)
-                           .chain(once(value as &ToSql)
-                                  .chain(once(value_type_tag as &ToSql)
-                                         .chain(once(to_bool_ref(added) as &ToSql)
-                                                .chain(once(flags as &ToSql))))))
+                once(e as &dyn ToSql)
+                    .chain(once(a as &dyn ToSql)
+                           .chain(once(value as &dyn ToSql)
+                                  .chain(once(value_type_tag as &dyn ToSql)
+                                         .chain(once(to_bool_ref(added) as &dyn ToSql)
+                                                .chain(once(flags as &dyn ToSql))))))
             }).collect();
 
             // TODO: cache this for selected values of count.
@@ -1036,15 +1036,15 @@ impl MentatStoring for rusqlite::Connection {
 
             // First, insert all fulltext string values.
             // `fts_params` reference computed values in `block`.
-            let fts_params: Vec<&ToSql> =
+            let fts_params: Vec<&dyn ToSql> =
                 block.iter()
                      .filter(|&&(ref _e, ref _a, ref value, ref _value_type_tag, _added, ref _flags, ref _searchid)| {
                          value.is_some()
                      })
                      .flat_map(|&(ref _e, ref _a, ref value, ref _value_type_tag, _added, ref _flags, ref searchid)| {
                          // Avoid inner heap allocation.
-                         once(value as &ToSql)
-                             .chain(once(searchid as &ToSql))
+                         once(value as &dyn ToSql)
+                             .chain(once(searchid as &dyn ToSql))
                      }).collect();
 
             // TODO: make this maximally efficient. It's not terribly inefficient right now.
@@ -1057,15 +1057,15 @@ impl MentatStoring for rusqlite::Connection {
 
             // Second, insert searches.
             // `params` reference computed values in `block`.
-            let params: Vec<&ToSql> = block.iter().flat_map(|&(ref e, ref a, ref _value, ref value_type_tag, added, ref flags, ref searchid)| {
+            let params: Vec<&dyn ToSql> = block.iter().flat_map(|&(ref e, ref a, ref _value, ref value_type_tag, added, ref flags, ref searchid)| {
                 // Avoid inner heap allocation.
                 // TODO: extract some finite length iterator to make this less indented!
-                once(e as &ToSql)
-                    .chain(once(a as &ToSql)
-                           .chain(once(searchid as &ToSql)
-                                  .chain(once(value_type_tag as &ToSql)
-                                         .chain(once(to_bool_ref(added) as &ToSql)
-                                                .chain(once(flags as &ToSql))))))
+                once(e as &dyn ToSql)
+                    .chain(once(a as &dyn ToSql)
+                           .chain(once(searchid as &dyn ToSql)
+                                  .chain(once(value_type_tag as &dyn ToSql)
+                                         .chain(once(to_bool_ref(added) as &dyn ToSql)
+                                                .chain(once(flags as &dyn ToSql))))))
             }).collect();
 
             // TODO: cache this for selected values of count.
@@ -1153,7 +1153,7 @@ pub fn committed_metadata_assertions(
 
     let mut stmt = conn.prepare_cached(&sql_stmt)?;
     let m: Result<Vec<_>> = stmt
-        .query_and_then(&[&tx_id as &ToSql], row_to_transaction_assertion)?
+        .query_and_then(&[&tx_id as &dyn ToSql], row_to_transaction_assertion)?
         .collect();
     m
 }
@@ -1253,13 +1253,13 @@ SELECT EXISTS
             match alteration {
                 &Index => {
                     // This should always succeed.
-                    index_stmt.execute([&attribute.index, &entid as &ToSql])?;
+                    index_stmt.execute([&attribute.index, &entid as &dyn ToSql])?;
                 }
                 &Unique => {
                     // TODO: This can fail if there are conflicting values; give a more helpful
                     // error message in this case.
                     if unique_value_stmt
-                        .execute([to_bool_ref(attribute.unique.is_some()), &entid as &ToSql])
+                        .execute([to_bool_ref(attribute.unique.is_some()), &entid as &dyn ToSql])
                         .is_err()
                     {
                         match attribute.unique {
@@ -1286,7 +1286,7 @@ SELECT EXISTS
                     // TODO: improve the failure message.  Perhaps try to mimic what Datomic says in
                     // this case?
                     if !attribute.multival {
-                        let mut rows = cardinality_stmt.query(&[&entid as &ToSql])?;
+                        let mut rows = cardinality_stmt.query(&[&entid as &dyn ToSql])?;
                         if rows.next()?.is_some() {
                             bail!(DbErrorKind::SchemaAlterationFailed(format!(
                                 "Cannot alter schema attribute {} to be :db.cardinality/one",

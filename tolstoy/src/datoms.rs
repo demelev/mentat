@@ -20,7 +20,7 @@ pub struct DatomsHelper<'a> {
 }
 
 impl<'a> DatomsHelper<'a> {
-    pub fn new(parts: &'a Vec<TxPart>) -> DatomsHelper {
+    pub fn new(parts: &'a Vec<TxPart>) -> DatomsHelper<'a> {
         DatomsHelper { parts: parts }
     }
 

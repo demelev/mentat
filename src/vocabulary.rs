@@ -645,7 +645,7 @@ impl<'a> CheckedVocabularies<'a> {
 }
 
 impl<'a> VocabularyStatus for CheckedVocabularies<'a> {
-    fn get(&self, name: &Keyword) -> Option<(&Definition, &VocabularyCheck)> {
+    fn get(&self, name: &Keyword) -> Option<(&Definition, &VocabularyCheck<'_>)> {
         self.items.get(name).map(|&(ref d, ref c)| (*d, c))
     }
 

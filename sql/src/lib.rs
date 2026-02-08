@@ -59,23 +59,23 @@ pub trait QueryBuilder {
 }
 
 pub trait QueryFragment {
-    fn push_sql(&self, out: &mut QueryBuilder) -> BuildQueryResult;
+    fn push_sql(&self, out: &mut dyn QueryBuilder) -> BuildQueryResult;
 }
 
-impl QueryFragment for Box<QueryFragment> {
-    fn push_sql(&self, out: &mut QueryBuilder) -> BuildQueryResult {
+impl QueryFragment for Box<dyn QueryFragment> {
+    fn push_sql(&self, out: &mut dyn QueryBuilder) -> BuildQueryResult {
         QueryFragment::push_sql(&**self, out)
     }
 }
 
-impl<'a> QueryFragment for &'a QueryFragment {
-    fn push_sql(&self, out: &mut QueryBuilder) -> BuildQueryResult {
+impl<'a> QueryFragment for &'a dyn QueryFragment {
+    fn push_sql(&self, out: &mut dyn QueryBuilder) -> BuildQueryResult {
         QueryFragment::push_sql(&**self, out)
     }
 }
 
 impl QueryFragment for () {
-    fn push_sql(&self, _out: &mut QueryBuilder) -> BuildQueryResult {
+    fn push_sql(&self, _out: &mut dyn QueryBuilder) -> BuildQueryResult {
         Ok(())
     }
 }

@@ -96,7 +96,7 @@ pub enum PreparedQuery<'sqlite> {
         schema: Schema,
         connection: &'sqlite rusqlite::Connection,
         args: Vec<(String, Rc<rusqlite::types::Value>)>,
-        projector: Box<Projector>,
+        projector: Box<dyn Projector>,
     },
 }
 
