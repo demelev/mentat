@@ -35,6 +35,9 @@ use tolstoy_traits::errors::TolstoyError;
 use hyper;
 
 #[cfg(feature = "syncable")]
+use reqwest;
+
+#[cfg(feature = "syncable")]
 use serde_json;
 
 pub type Result<T> = std::result::Result<T, MentatError>;
@@ -126,6 +129,10 @@ pub enum MentatError {
     #[cfg(feature = "syncable")]
     #[error(transparent)]
     NetworkError(#[from] hyper::Error),
+
+    #[cfg(feature = "syncable")]
+    #[error(transparent)]
+    ReqwestError(#[from] reqwest::Error),
 
     #[cfg(feature = "syncable")]
     #[error(transparent)]

@@ -23,7 +23,7 @@ use tolstoy_traits::errors::{
     TolstoyError,
 };
 
-use types::{
+use crate::types::{
     LocalGlobalTxMapping,
 };
 
@@ -101,7 +101,7 @@ impl TxMapper {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use schema;
+    use crate::schema;
 
     #[test]
     fn test_getters() {
