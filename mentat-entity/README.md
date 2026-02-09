@@ -21,12 +21,20 @@ use mentat_entity::{Entity, EntityWrite, EntityRead, transact_schema};
 use mentat::{Store, TypedValue};
 
 #[derive(Entity)]
+struct Car {
+    number: String,
+    registration: EntityId,
+}
+
+#[derive(Entity)]
 #[entity(namespace = "person")]
 struct Person {
     #[entity(unique = "identity")]
     email: String,
     name: String,
     age: Option<i64>,
+    #[attr(":car/_owner") ]
+    car: Car,
 }
 
 fn main() {
