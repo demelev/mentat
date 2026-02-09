@@ -4,17 +4,66 @@ This crate provides ORM-like functionality for the Mentat knowledge base, allowi
 
 ## Features
 
-- **Derive Macro**: Automatically implement Entity traits for your structs with `#[derive(Entity)]`
+- **Derive Macros**: 
+  - `#[derive(Entity)]` - Automatically implement Entity traits for your structs
+  - `#[derive(EntityView)]` - Generate metadata for entity views with refs/backrefs
+  - `#[derive(EntityPatch)]` - Generate transaction operations from entity patches
 - **Schema Generation**: Automatically generate Mentat schema from struct definitions
 - **Type-Safe Operations**: All database operations are type-checked at compile time
 - **Optional Fields**: Support for `Option<T>` fields that map to optional attributes
+- **Refs and Backrefs**: Support for forward and reverse references between entities
+- **Cardinality**: Automatic detection of cardinality (one vs many) from field types
 - **Unique Constraints**: Support for unique identity and unique value constraints
 - **Indexing**: Mark fields for indexing with attributes
 - **No JSON Round-trips**: Direct conversion between Rust types and Mentat's TypedValue
 
+## Quick Start
+
+### EntityView and EntityPatch (Recommended for New Code)
+
+```rust
+use mentat_entity::{EntityView, EntityPatch, EntityId, Patch, ManyPatch};
+
+// Define a view of an entity
+#[derive(EntityView)]
+#[entity(ns = "person")]
+struct PersonView {
+    #[attr(":db/id")]
+    id: i64,
+    name: String,
+    #[backref(attr = ":car/owner")]
+    cars: Vec<CarView>,
+}
+
+// Define a patch for updating entities
+#[derive(EntityPatch)]
+#[entity(ns = "person")]
+struct PersonPatch {
+    #[entity_id]
+    id: EntityId,
+    name: Patch<String>,
+    tags: ManyPatch<String>,
+}
+
+// Use the patch
+let patch = PersonPatch {
+    id: EntityId::Entid(100),
+    name: Patch::Set("Alice".to_string()),
+    tags: ManyPatch {
+        add: vec!["vip".to_string()],
+        remove: vec![],
+        clear: false,
+    },
+};
+
+let ops = patch.to_tx(); // Generate transaction operations
+```
+
+See [ENTITY_CODEGEN.md](./ENTITY_CODEGEN.md) for complete documentation of EntityView and EntityPatch.
+
 ## Usage
 
-### Basic Example
+### Basic Example (Entity macro - traditional ORM)
 
 ```rust
 use mentat_entity::{Entity, EntityWrite, EntityRead, transact_schema};

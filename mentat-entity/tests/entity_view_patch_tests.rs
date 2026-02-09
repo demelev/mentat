@@ -35,7 +35,7 @@ struct CarView {
     #[attr(":db/id")]
     id: i64,
     model: String,
-    #[r#ref(attr = ":car/owner")]
+    #[fref(attr = ":car/owner")]
     owner: EntityId,
 }
 

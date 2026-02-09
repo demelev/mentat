@@ -501,7 +501,7 @@ fn parse_view_field_attributes(attrs: &[Attribute]) -> (Option<String>, Option<S
                     }
                 }
             }
-        } else if attr_name.as_deref() == Some("ref") || attr.path.is_ident("ref") {
+        } else if attr_name.as_deref() == Some("ref") || attr.path.is_ident("ref") || attr.path.is_ident("fref") {
             is_ref = true;
             if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
                 for nested in &meta_list.nested {
@@ -600,7 +600,7 @@ fn extract_type_info(ty: &Type) -> (String, bool, Option<String>) {
 ///     car: Option<CarView>,
 /// }
 /// ```
-#[proc_macro_derive(EntityView, attributes(entity, attr, r#ref, backref, entity_id))]
+#[proc_macro_derive(EntityView, attributes(entity, attr, r#ref, fref, backref, entity_id))]
 pub fn derive_entity_view(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
