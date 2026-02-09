@@ -46,9 +46,8 @@ extern crate edn;
 extern crate mentat_db;
 extern crate uuid;
 
-#[macro_use]
 pub extern crate mentat_entity_derive;
-pub use mentat_entity_derive::Entity;
+pub use mentat_entity_derive::{Entity, EntityView, EntityPatch};
 
 pub use core_traits;
 pub use mentat_core;
@@ -74,6 +73,155 @@ use public_traits::errors::Result;
 pub enum MentatEntityError {
     #[error("Missing required field: {0}")]
     MissingRequiredField(String),
+    #[error("Backref cardinality violation: expected one, found multiple")]
+    BackrefCardinalityViolation,
+    #[error("Missing entity: {0}")]
+    MissingEntity(String),
+    #[error("Type mismatch: {0}")]
+    TypeMismatch(String),
+}
+
+// ============================================================================
+// EntityView/EntityPatch Types (from tech spec)
+// ============================================================================
+
+/// Universal entity identifier
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum EntityId {
+    /// Direct entity ID
+    Entid(i64),
+    /// Lookup reference: find entity by unique attribute
+    LookupRef {
+        attr: &'static str,
+        value: TypedValue,
+    },
+    /// Temporary ID for transaction (will be resolved to actual Entid)
+    Temp(i64),
+}
+
+impl From<i64> for EntityId {
+    fn from(id: i64) -> Self {
+        EntityId::Entid(id)
+    }
+}
+
+/// Transaction operation
+#[derive(Clone, Debug, PartialEq)]
+pub enum TxOp {
+    /// Assert a fact (add or update)
+    Assert {
+        e: EntityId,
+        a: &'static str,
+        v: TypedValue,
+    },
+    /// Retract a specific fact
+    Retract {
+        e: EntityId,
+        a: &'static str,
+        v: TypedValue,
+    },
+    /// Retract all values for an attribute
+    RetractAttr {
+        e: EntityId,
+        a: &'static str,
+    },
+}
+
+/// Patch for a single-valued (cardinality-one) field
+#[derive(Clone, Debug, PartialEq)]
+pub enum Patch<T> {
+    /// No change to this field
+    NoChange,
+    /// Set the field to a new value
+    Set(T),
+    /// Unset (retract) the field
+    Unset,
+}
+
+impl<T> Default for Patch<T> {
+    fn default() -> Self {
+        Patch::NoChange
+    }
+}
+
+/// Patch for a multi-valued (cardinality-many) field
+#[derive(Clone, Debug, PartialEq)]
+pub struct ManyPatch<T> {
+    /// Values to add
+    pub add: Vec<T>,
+    /// Values to remove
+    pub remove: Vec<T>,
+    /// Clear all existing values before adding
+    pub clear: bool,
+}
+
+impl<T> Default for ManyPatch<T> {
+    fn default() -> Self {
+        Self {
+            add: Vec::new(),
+            remove: Vec::new(),
+            clear: false,
+        }
+    }
+}
+
+impl<T> ManyPatch<T> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_add(mut self, values: Vec<T>) -> Self {
+        self.add = values;
+        self
+    }
+
+    pub fn with_remove(mut self, values: Vec<T>) -> Self {
+        self.remove = values;
+        self
+    }
+
+    pub fn with_clear(mut self, clear: bool) -> Self {
+        self.clear = clear;
+        self
+    }
+}
+
+/// Kind of field in an entity view
+#[derive(Clone, Debug, PartialEq)]
+pub enum FieldKind {
+    /// Scalar value (string, long, etc.)
+    Scalar,
+    /// Reference to another entity
+    Ref {
+        /// Type name of the nested view
+        nested: &'static str,
+    },
+    /// Reverse reference (backref)
+    Backref {
+        /// Type name of the nested view
+        nested: &'static str,
+    },
+}
+
+/// Specification for a field in an entity view
+#[derive(Clone, Debug)]
+pub struct FieldSpec {
+    /// Rust field name
+    pub rust_name: &'static str,
+    /// Attribute identifier (e.g., ":person/name" or forward ident for backref)
+    pub attr: &'static str,
+    /// Kind of field
+    pub kind: FieldKind,
+    /// Whether this field has many cardinality
+    pub cardinality_many: bool,
+}
+
+/// Trait for entity view metadata
+pub trait EntityViewSpec {
+    /// Namespace for this entity type
+    const NS: &'static str;
+    /// Field specifications
+    const FIELDS: &'static [FieldSpec];
 }
 
 /// Represents the type of an entity field in the schema
