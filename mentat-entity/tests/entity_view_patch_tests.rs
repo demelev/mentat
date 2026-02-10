@@ -328,3 +328,154 @@ fn test_user_patch_default_attrs() {
     assert!(attrs.contains(&":user_patch/age"));
     assert!(attrs.contains(&":user_patch/active"));
 }
+
+// ============================================================================
+// Test 6: Ensure/CAS predicates for optimistic concurrency
+// ============================================================================
+
+#[test]
+fn test_patch_with_ensure() {
+    let patch = OrderPatch {
+        id: EntityId::Entid(100),
+        status: Patch::SetWithEnsure {
+            expected: OrderStatus::Pending,
+            new: OrderStatus::Paid,
+        },
+        customer: Patch::NoChange,
+        tags: ManyPatch::new(),
+    };
+
+    let ops = patch.to_tx();
+    
+    // Should have 2 ops: Ensure then Assert
+    assert_eq!(ops.len(), 2);
+
+    match &ops[0] {
+        TxOp::Ensure { e, a, v: _ } => {
+            assert_eq!(e, &EntityId::Entid(100));
+            assert_eq!(*a, ":order/status");
+        }
+        _ => panic!("Expected Ensure for status, got {:?}", ops[0]),
+    }
+
+    match &ops[1] {
+        TxOp::Assert { e, a, v: _ } => {
+            assert_eq!(e, &EntityId::Entid(100));
+            assert_eq!(*a, ":order/status");
+        }
+        _ => panic!("Expected Assert for status, got {:?}", ops[1]),
+    }
+}
+
+// ============================================================================
+// Test 7: View profiles (different views of same entity)
+// ============================================================================
+
+#[derive(EntityView)]
+#[entity(ns = "user")]
+struct UserView {
+    #[attr(":db/id")]
+    id: i64,
+    
+    // Always included
+    name: String,
+    
+    // Only in "full" profile
+    #[profile("full")]
+    email: String,
+    
+    #[profile("full")]
+    phone: Option<String>,
+    
+    // Only in "summary" profile
+    #[profile("summary")]
+    display_name: String,
+}
+
+#[test]
+fn test_view_profiles() {
+    // All fields should be present
+    assert_eq!(UserView::FIELDS.len(), 5);
+    
+    // Check that profile metadata is set
+    let email_field = &UserView::FIELDS[2];
+    assert_eq!(email_field.rust_name, "email");
+    assert_eq!(email_field.profiles, Some(&["full"][..]));
+    
+    let phone_field = &UserView::FIELDS[3];
+    assert_eq!(phone_field.rust_name, "phone");
+    assert_eq!(phone_field.profiles, Some(&["full"][..]));
+    
+    let display_name_field = &UserView::FIELDS[4];
+    assert_eq!(display_name_field.rust_name, "display_name");
+    assert_eq!(display_name_field.profiles, Some(&["summary"][..]));
+    
+    // Fields without profiles should have None
+    let name_field = &UserView::FIELDS[1];
+    assert_eq!(name_field.rust_name, "name");
+    assert_eq!(name_field.profiles, None);
+    
+    // Test profile filtering
+    let full_fields = UserView::fields_for_profile("full");
+    let full_names: Vec<_> = full_fields.iter().map(|f| f.rust_name).collect();
+    assert!(full_names.contains(&"email"));
+    assert!(full_names.contains(&"phone"));
+    assert!(full_names.contains(&"name")); // Always included
+    assert!(!full_names.contains(&"display_name"));
+}
+
+// ============================================================================
+// Test 8: EDN pull pattern generation
+// ============================================================================
+
+#[test]
+fn test_pull_pattern_generation() {
+    let pattern = PersonView::pull_pattern(0, None);
+    println!("Generated pattern: {}", pattern);
+    
+    // Should contain all scalar attributes
+    assert!(pattern.contains(":person/name"));
+    
+    // Test with depth > 0
+    let pattern_depth1 = PersonView::pull_pattern(1, None);
+    println!("Generated pattern with depth 1: {}", pattern_depth1);
+}
+
+// ============================================================================
+// Test 9: Component attribute
+// ============================================================================
+
+#[derive(EntityView)]
+#[entity(ns = "document")]
+struct DocumentView {
+    #[attr(":db/id")]
+    id: i64,
+    
+    title: String,
+    
+    // Component reference - will be cascade-deleted
+    #[fref(attr = ":document/metadata")]
+    #[component]
+    metadata: Option<MetadataView>,
+}
+
+#[derive(EntityView)]
+#[entity(ns = "metadata")]
+struct MetadataView {
+    #[attr(":db/id")]
+    id: i64,
+    
+    created_at: i64,
+    author: String,
+}
+
+#[test]
+fn test_component_attribute() {
+    let metadata_field = &DocumentView::FIELDS[2];
+    assert_eq!(metadata_field.rust_name, "metadata");
+    assert!(metadata_field.is_component);
+    
+    // Non-component fields should have is_component = false
+    let title_field = &DocumentView::FIELDS[1];
+    assert!(!title_field.is_component);
+}

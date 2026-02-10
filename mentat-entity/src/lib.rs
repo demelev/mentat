@@ -125,6 +125,12 @@ pub enum TxOp {
         e: EntityId,
         a: &'static str,
     },
+    /// Ensure predicate (optimistic concurrency check)
+    Ensure {
+        e: EntityId,
+        a: &'static str,
+        v: TypedValue,
+    },
 }
 
 /// Patch for a single-valued (cardinality-one) field
@@ -136,6 +142,14 @@ pub enum Patch<T> {
     Set(T),
     /// Unset (retract) the field
     Unset,
+    /// Set with ensure predicate (optimistic concurrency)
+    /// Ensures current value matches expected before setting new value
+    SetWithEnsure {
+        /// Expected current value
+        expected: T,
+        /// New value to set
+        new: T,
+    },
 }
 
 impl<T> Default for Patch<T> {
@@ -214,6 +228,10 @@ pub struct FieldSpec {
     pub kind: FieldKind,
     /// Whether this field has many cardinality
     pub cardinality_many: bool,
+    /// Optional profiles this field belongs to (None = all profiles)
+    pub profiles: Option<&'static [&'static str]>,
+    /// Whether this field is a component (for cascade operations)
+    pub is_component: bool,
 }
 
 /// Trait for entity view metadata
@@ -222,6 +240,68 @@ pub trait EntityViewSpec {
     const NS: &'static str;
     /// Field specifications
     const FIELDS: &'static [FieldSpec];
+    /// Available view profiles
+    const PROFILES: &'static [&'static str] = &[];
+    
+    /// Get fields for a specific profile
+    fn fields_for_profile(profile: &str) -> Vec<&'static FieldSpec> {
+        Self::FIELDS
+            .iter()
+            .filter(|f| {
+                f.profiles.map_or(true, |profiles| profiles.contains(&profile))
+            })
+            .collect()
+    }
+    
+    /// Generate EDN pull pattern for this view
+    /// 
+    /// # Arguments
+    /// * `depth` - Maximum depth for nested views (0 = scalars only, 1+ = include refs/backrefs)
+    /// * `profile` - Optional profile name to filter fields
+    fn pull_pattern(depth: usize, profile: Option<&str>) -> String {
+        Self::pull_pattern_impl(depth, profile, &mut std::collections::HashSet::new())
+    }
+    
+    /// Internal implementation with cycle detection
+    fn pull_pattern_impl(
+        depth: usize,
+        profile: Option<&str>,
+        visited: &mut std::collections::HashSet<&'static str>,
+    ) -> String {
+        // Prevent infinite recursion
+        let type_name = std::any::type_name::<Self>();
+        if visited.contains(&type_name) {
+            return "...".to_string();
+        }
+        visited.insert(type_name);
+        
+        let fields = if let Some(prof) = profile {
+            Self::fields_for_profile(prof)
+        } else {
+            Self::FIELDS.iter().collect()
+        };
+        
+        let mut attrs = vec!["*".to_string()]; // Start with :db/id
+        
+        for field in fields {
+            match &field.kind {
+                FieldKind::Scalar => {
+                    attrs.push(field.attr.to_string());
+                }
+                FieldKind::Ref { nested: _ } | FieldKind::Backref { nested: _ } => {
+                    if depth > 0 {
+                        // For refs/backrefs, we'd need to recursively call pull_pattern
+                        // on the nested type, but we can't do that statically without
+                        // trait bounds. For now, just include the attribute.
+                        attrs.push(field.attr.to_string());
+                    }
+                }
+            }
+        }
+        
+        visited.remove(&type_name);
+        format!("[{}]", attrs.join(" "))
+    }
 }
 
 /// Represents the type of an entity field in the schema

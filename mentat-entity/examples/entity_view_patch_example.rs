@@ -168,6 +168,9 @@ fn main() {
             TxOp::RetractAttr { e, a } => {
                 println!("  {}. RetractAttr {:?} {}", i + 1, e, a);
             }
+            TxOp::Ensure { e, a, v: _ } => {
+                println!("  {}. Ensure {:?} {}", i + 1, e, a);
+            }
         }
     }
 
@@ -191,5 +194,80 @@ fn main() {
         }
     }
 
+    println!("\n=== Future Enhancements Demo ===\n");
+    
+    // 1. Optimistic concurrency with Ensure
+    println!("1. Optimistic Concurrency (Ensure/CAS):");
+    let concurrent_patch = OrderPatch {
+        id: EntityId::Entid(200),
+        status: Patch::SetWithEnsure {
+            expected: OrderStatus::Pending,
+            new: OrderStatus::Paid,
+        },
+        customer: Patch::NoChange,
+        tags: ManyPatch::new(),
+    };
+    
+    let ops_ensure = concurrent_patch.to_tx();
+    println!("   Generated {} ops with Ensure predicate", ops_ensure.len());
+    println!("   First op: Ensure (checks current value)");
+    println!("   Second op: Assert (sets new value)");
+    
+    // 2. View profiles
+    println!("\n2. View Profiles:");
+    println!("   All UserView fields: {}", UserView::FIELDS.len());
+    let full_profile = UserView::fields_for_profile("full");
+    println!("   'full' profile fields: {}", full_profile.len());
+    let summary_profile = UserView::fields_for_profile("summary");
+    println!("   'summary' profile fields: {}", summary_profile.len());
+    
+    // 3. EDN pull pattern
+    println!("\n3. EDN Pull Pattern Generation:");
+    let pattern = ProductView::pull_pattern(0, None);
+    println!("   Pattern: {}", pattern);
+    
+    // 4. Component cascades
+    println!("\n4. Component Attributes:");
+    for field in DocumentView::FIELDS {
+        if field.is_component {
+            println!("   Component field: {} (will cascade on delete)", field.rust_name);
+        }
+    }
+
     println!("\nExample completed successfully!");
+}
+
+// Additional view types for demo
+#[derive(EntityView)]
+#[entity(ns = "user")]
+struct UserView {
+    #[attr(":db/id")]
+    id: i64,
+    name: String,
+    #[profile("full")]
+    email: String,
+    #[profile("full")]
+    phone: Option<String>,
+    #[profile("summary")]
+    display_name: String,
+}
+
+#[derive(EntityView)]
+#[entity(ns = "document")]
+struct DocumentView {
+    #[attr(":db/id")]
+    id: i64,
+    title: String,
+    #[fref(attr = ":document/metadata")]
+    #[component]
+    metadata: Option<MetadataView>,
+}
+
+#[derive(EntityView)]
+#[entity(ns = "metadata")]
+struct MetadataView {
+    #[attr(":db/id")]
+    id: i64,
+    created_at: i64,
+    author: String,
 }

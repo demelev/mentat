@@ -483,11 +483,13 @@ fn extract_namespace_or_default(attrs: &[Attribute], struct_name: &str) -> Strin
     to_snake_case(struct_name)
 }
 
-fn parse_view_field_attributes(attrs: &[Attribute]) -> (Option<String>, Option<String>, bool, bool) {
+fn parse_view_field_attributes(attrs: &[Attribute]) -> (Option<String>, Option<String>, bool, bool, Option<Vec<String>>, bool) {
     let mut attr_override = None;
     let mut ref_attr = None;
     let mut is_ref = false;
     let mut is_backref = false;
+    let mut profiles = None;
+    let mut is_component = false;
 
     for attr in attrs {
         // Get the attribute name as a string to handle both "ref" and "r#ref"
@@ -499,6 +501,20 @@ fn parse_view_field_attributes(attrs: &[Attribute]) -> (Option<String>, Option<S
                     if let NestedMeta::Lit(Lit::Str(s)) = nested {
                         attr_override = Some(s.value());
                     }
+                }
+            }
+        } else if attr.path.is_ident("component") {
+            is_component = true;
+        } else if attr.path.is_ident("profile") {
+            if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
+                let mut profile_list = Vec::new();
+                for nested in &meta_list.nested {
+                    if let NestedMeta::Lit(Lit::Str(s)) = nested {
+                        profile_list.push(s.value());
+                    }
+                }
+                if !profile_list.is_empty() {
+                    profiles = Some(profile_list);
                 }
             }
         } else if attr_name.as_deref() == Some("ref") || attr.path.is_ident("ref") || attr.path.is_ident("fref") {
@@ -536,7 +552,7 @@ fn parse_view_field_attributes(attrs: &[Attribute]) -> (Option<String>, Option<S
         }
     }
 
-    (attr_override, ref_attr, is_ref, is_backref)
+    (attr_override, ref_attr, is_ref, is_backref, profiles, is_component)
 }
 
 fn extract_type_info(ty: &Type) -> (String, bool, Option<String>) {
@@ -600,7 +616,7 @@ fn extract_type_info(ty: &Type) -> (String, bool, Option<String>) {
 ///     car: Option<CarView>,
 /// }
 /// ```
-#[proc_macro_derive(EntityView, attributes(entity, attr, r#ref, fref, backref, entity_id))]
+#[proc_macro_derive(EntityView, attributes(entity, attr, r#ref, fref, backref, entity_id, profile, component))]
 pub fn derive_entity_view(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
@@ -621,7 +637,7 @@ pub fn derive_entity_view(input: TokenStream) -> TokenStream {
         let field_name = field.ident.as_ref().unwrap();
         let field_name_str = field_name.to_string();
         
-        let (attr_override, ref_attr, is_ref, is_backref) = parse_view_field_attributes(&field.attrs);
+        let (attr_override, ref_attr, is_ref, is_backref, profiles, is_component) = parse_view_field_attributes(&field.attrs);
         let (base_type, is_vec, nested_type) = extract_type_info(&field.ty);
 
         // Determine attribute identifier
@@ -644,12 +660,22 @@ pub fn derive_entity_view(input: TokenStream) -> TokenStream {
             quote! { mentat_entity::FieldKind::Scalar }
         };
 
+        // Generate profiles array if specified
+        let profiles_expr = if let Some(profile_vec) = profiles {
+            let profile_strs: Vec<_> = profile_vec.iter().collect();
+            quote! { Some(&[#(#profile_strs),*]) }
+        } else {
+            quote! { None }
+        };
+
         field_specs.push(quote! {
             mentat_entity::FieldSpec {
                 rust_name: #field_name_str,
                 attr: #attr_ident,
                 kind: #kind,
                 cardinality_many: #is_vec,
+                profiles: #profiles_expr,
+                is_component: #is_component,
             }
         });
     }
@@ -796,6 +822,8 @@ pub fn derive_entity_patch(input: TokenStream) -> TokenStream {
         if is_patch {
             // Handle Patch<T>
             let to_value = generate_value_conversion(&inner_type, quote! { v });
+            let to_value_expected = generate_value_conversion(&inner_type, quote! { expected });
+            let to_value_new = generate_value_conversion(&inner_type, quote! { new });
             tx_op_arms.push(quote! {
                 match &self.#field_name {
                     mentat_entity::Patch::NoChange => {},
@@ -811,6 +839,20 @@ pub fn derive_entity_patch(input: TokenStream) -> TokenStream {
                         ops.push(mentat_entity::TxOp::RetractAttr {
                             e: self.#entity_id_field.clone(),
                             a: #attr_ident,
+                        });
+                    },
+                    mentat_entity::Patch::SetWithEnsure { expected, new } => {
+                        let expected_value = #to_value_expected;
+                        ops.push(mentat_entity::TxOp::Ensure {
+                            e: self.#entity_id_field.clone(),
+                            a: #attr_ident,
+                            v: expected_value,
+                        });
+                        let new_value = #to_value_new;
+                        ops.push(mentat_entity::TxOp::Assert {
+                            e: self.#entity_id_field.clone(),
+                            a: #attr_ident,
+                            v: new_value,
                         });
                     },
                 }
@@ -873,7 +915,16 @@ fn generate_value_conversion(
         "EntityId" => quote! {
             match #value_expr {
                 mentat_entity::EntityId::Entid(id) => mentat_entity::core_traits::TypedValue::Ref(*id),
-                _ => panic!("Only Entid is supported in patches for now"),
+                mentat_entity::EntityId::LookupRef { .. } => {
+                    // LookupRef needs to be resolved to Entid during transaction
+                    // For now, we'll need to handle this at transaction time
+                    panic!("LookupRef in EntityPatch requires transaction-time resolution")
+                },
+                mentat_entity::EntityId::Temp(tempid) => {
+                    // TempId will be resolved during transaction
+                    // Store as a special marker that needs resolution
+                    panic!("TempId in EntityPatch requires transaction-time resolution")
+                },
             }
         },
         _ => {

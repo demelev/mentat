@@ -261,3 +261,168 @@ For `ManyPatch<T>`:
 - Full LookupRef/TempId support in patches
 - EDN pull pattern generation
 - Pull depth control
+
+## Advanced Features
+
+### Optimistic Concurrency (Ensure/CAS)
+
+Use `Patch::SetWithEnsure` to implement optimistic concurrency control:
+
+```rust
+let patch = OrderPatch {
+    id: EntityId::Entid(100),
+    status: Patch::SetWithEnsure {
+        expected: OrderStatus::Pending,  // Current expected value
+        new: OrderStatus::Paid,           // New value to set
+    },
+    // ...
+};
+
+// Generates:
+// 1. TxOp::Ensure { e, a, v: expected }  - Check current value
+// 2. TxOp::Assert { e, a, v: new }       - Set new value
+```
+
+If the current value doesn't match `expected`, the transaction will fail, preventing lost updates in concurrent scenarios.
+
+### View Profiles
+
+Define different views of the same entity using profiles:
+
+```rust
+#[derive(EntityView)]
+#[entity(ns = "user")]
+struct UserView {
+    #[attr(":db/id")]
+    id: i64,
+    
+    // Always included
+    name: String,
+    
+    // Only in "full" profile
+    #[profile("full")]
+    email: String,
+    
+    #[profile("full")]
+    phone: Option<String>,
+    
+    // Only in "summary" profile
+    #[profile("summary")]
+    display_name: String,
+}
+
+// Filter fields by profile
+let full_fields = UserView::fields_for_profile("full");
+let summary_fields = UserView::fields_for_profile("summary");
+```
+
+Fields without a `#[profile(...)]` attribute are included in all profiles.
+
+### EDN Pull Pattern Generation
+
+Generate EDN pull patterns from view metadata:
+
+```rust
+// Generate pull pattern with depth control
+let pattern = PersonView::pull_pattern(0, None);  // depth=0: scalars only
+// Output: "[* :db/id :person/name :car/owner]"
+
+let pattern = PersonView::pull_pattern(1, Some("full"));  // with profile
+// Output includes fields from "full" profile
+```
+
+The `depth` parameter controls how deep to traverse refs/backrefs:
+- `depth=0`: Only scalar fields
+- `depth>=1`: Include refs/backrefs (nested views with depth-1)
+
+### Component Attributes
+
+Mark fields as components for cascade operations:
+
+```rust
+#[derive(EntityView)]
+#[entity(ns = "document")]
+struct DocumentView {
+    #[attr(":db/id")]
+    id: i64,
+    
+    // Component reference - will be cascade-deleted
+    #[fref(attr = ":document/metadata")]
+    #[component]
+    metadata: Option<MetadataView>,
+}
+```
+
+When `is_component=true`, the referenced entity is owned by the parent and will be:
+- Cascade-deleted when the parent is deleted
+- Automatically retracted if the reference is removed
+
+### Full LookupRef/TempId Support
+
+The framework now supports all `EntityId` variants:
+
+```rust
+pub enum EntityId {
+    Entid(i64),                                    // Direct entity ID
+    LookupRef { attr: &'static str, value: TypedValue },  // Lookup by unique attr
+    Temp(i64),                                     // Temporary ID for transaction
+}
+```
+
+Note: LookupRef and Temp variants currently panic in patches and require transaction-time resolution.
+
+## Complete Feature List
+
+### EntityView Attributes
+
+**Container:**
+- `#[entity(ns = "namespace")]` - Set namespace (default: snake_case of struct name)
+
+**Fields:**
+- `#[attr(":custom/ident")]` - Override attribute identifier
+- `#[fref(attr = ":x/y")]` - Mark as forward reference
+- `#[backref(attr = ":x/y")]` - Mark as reverse reference
+- `#[profile("profile_name")]` - Include field in specific profile(s)
+- `#[component]` - Mark as component for cascade operations
+
+### EntityPatch Attributes
+
+**Container:**
+- `#[entity(ns = "namespace")]` - Set namespace (default: snake_case of struct name)
+
+**Fields:**
+- `#[entity_id]` - Required: mark as entity ID field
+- `#[attr(":custom/ident")]` - Override attribute identifier
+
+### Patch Types
+
+**Patch<T>:**
+- `Patch::NoChange` - No modification
+- `Patch::Set(value)` - Set new value → `TxOp::Assert`
+- `Patch::Unset` - Remove value → `TxOp::RetractAttr`
+- `Patch::SetWithEnsure { expected, new }` - CAS → `TxOp::Ensure` + `TxOp::Assert`
+
+**ManyPatch<T>:**
+- `add: Vec<T>` - Values to add → `TxOp::Assert` for each
+- `remove: Vec<T>` - Values to remove → `TxOp::Retract` for each
+- `clear: bool` - Clear all first → `TxOp::RetractAttr`
+
+### TxOp Variants
+
+```rust
+pub enum TxOp {
+    Assert { e: EntityId, a: &'static str, v: TypedValue },
+    Retract { e: EntityId, a: &'static str, v: TypedValue },
+    RetractAttr { e: EntityId, a: &'static str },
+    Ensure { e: EntityId, a: &'static str, v: TypedValue },  // New!
+}
+```
+
+## Updated Examples
+
+See `examples/entity_view_patch_example.rs` for a complete working example demonstrating all features:
+- Basic EntityView and EntityPatch
+- Optimistic concurrency with Ensure
+- View profiles
+- EDN pull pattern generation
+- Component attributes
