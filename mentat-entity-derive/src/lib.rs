@@ -433,3 +433,503 @@ fn generate_from_typed_value(
         _ => panic!("Unsupported type conversion: {}", field_type),
     }
 }
+
+// ============================================================================
+// EntityView and EntityPatch derive macros (from tech spec)
+// ============================================================================
+
+/// Helper function to convert a string to snake_case
+fn to_snake_case(s: &str) -> String {
+    let mut result = String::new();
+    let mut prev_was_uppercase = false;
+    
+    for (i, ch) in s.chars().enumerate() {
+        if ch.is_uppercase() {
+            if i > 0 && !prev_was_uppercase {
+                result.push('_');
+            }
+            result.push(ch.to_lowercase().next().unwrap());
+            prev_was_uppercase = true;
+        } else {
+            result.push(ch);
+            prev_was_uppercase = false;
+        }
+    }
+    
+    result
+}
+
+/// Extract namespace from container attributes, with default to snake_case of struct name
+fn extract_namespace_or_default(attrs: &[Attribute], struct_name: &str) -> String {
+    for attr in attrs {
+        if attr.path.is_ident("entity") {
+            if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
+                for nested in &meta_list.nested {
+                    if let NestedMeta::Meta(Meta::NameValue(MetaNameValue {
+                        path,
+                        lit: Lit::Str(s),
+                        ..
+                    })) = nested
+                    {
+                        if path.is_ident("ns") || path.is_ident("namespace") {
+                            return s.value();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Default: snake_case of struct name
+    to_snake_case(struct_name)
+}
+
+fn parse_view_field_attributes(attrs: &[Attribute]) -> (Option<String>, Option<String>, bool, bool, Option<Vec<String>>, bool) {
+    let mut attr_override = None;
+    let mut ref_attr = None;
+    let mut is_ref = false;
+    let mut is_backref = false;
+    let mut profiles = None;
+    let mut is_component = false;
+
+    for attr in attrs {
+        // Get the attribute name as a string to handle both "ref" and "r#ref"
+        let attr_name = attr.path.get_ident().map(|i| i.to_string());
+        
+        if attr.path.is_ident("attr") {
+            if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
+                for nested in &meta_list.nested {
+                    if let NestedMeta::Lit(Lit::Str(s)) = nested {
+                        attr_override = Some(s.value());
+                    }
+                }
+            }
+        } else if attr.path.is_ident("component") {
+            is_component = true;
+        } else if attr.path.is_ident("profile") {
+            if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
+                let mut profile_list = Vec::new();
+                for nested in &meta_list.nested {
+                    if let NestedMeta::Lit(Lit::Str(s)) = nested {
+                        profile_list.push(s.value());
+                    }
+                }
+                if !profile_list.is_empty() {
+                    profiles = Some(profile_list);
+                }
+            }
+        } else if attr_name.as_deref() == Some("ref") || attr.path.is_ident("ref") || attr.path.is_ident("fref") {
+            is_ref = true;
+            if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
+                for nested in &meta_list.nested {
+                    if let NestedMeta::Meta(Meta::NameValue(MetaNameValue {
+                        path,
+                        lit: Lit::Str(s),
+                        ..
+                    })) = nested
+                    {
+                        if path.is_ident("attr") {
+                            ref_attr = Some(s.value());
+                        }
+                    }
+                }
+            }
+        } else if attr.path.is_ident("backref") {
+            is_backref = true;
+            if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
+                for nested in &meta_list.nested {
+                    if let NestedMeta::Meta(Meta::NameValue(MetaNameValue {
+                        path,
+                        lit: Lit::Str(s),
+                        ..
+                    })) = nested
+                    {
+                        if path.is_ident("attr") {
+                            ref_attr = Some(s.value());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (attr_override, ref_attr, is_ref, is_backref, profiles, is_component)
+}
+
+fn extract_type_info(ty: &Type) -> (String, bool, Option<String>) {
+    match ty {
+        Type::Path(type_path) => {
+            let segment = type_path.path.segments.last().unwrap();
+            let type_name = segment.ident.to_string();
+
+            // Check for Option<T>
+            if type_name == "Option" {
+                if let PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
+                        let (inner_type, is_vec, nested) = extract_type_info(inner_ty);
+                        return (inner_type, is_vec, nested);
+                    }
+                }
+            }
+
+            // Check for Vec<T>
+            if type_name == "Vec" {
+                if let PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
+                        if let Type::Path(inner_path) = inner_ty {
+                            let inner_segment = inner_path.path.segments.last().unwrap();
+                            let inner_name = inner_segment.ident.to_string();
+                            return (inner_name.clone(), true, Some(inner_name));
+                        }
+                    }
+                }
+            }
+
+            (type_name, false, None)
+        }
+        _ => panic!("Unsupported field type"),
+    }
+}
+
+/// Derive macro for EntityView
+///
+/// # Attributes
+///
+/// ## Container attributes:
+/// - `#[entity(ns="namespace")]` - Optional namespace (defaults to snake_case of struct name)
+///
+/// ## Field attributes:
+/// - `#[attr(":custom/ident")]` - Override attribute identifier
+/// - `#[entity_id]` - Mark field as entity ID
+/// - `#[ref(attr=":x/y")]` - Forward reference
+/// - `#[backref(attr=":x/y")]` - Reverse reference
+///
+/// # Example
+///
+/// ```ignore
+/// #[derive(EntityView)]
+/// #[entity(ns="person")]
+/// struct PersonView {
+///     #[attr(":db/id")]
+///     id: i64,
+///     name: String,
+///     #[backref(attr=":car/owner")]
+///     car: Option<CarView>,
+/// }
+/// ```
+#[proc_macro_derive(EntityView, attributes(entity, attr, r#ref, fref, backref, entity_id, profile, component))]
+pub fn derive_entity_view(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+    let name_str = name.to_string();
+    let namespace = extract_namespace_or_default(&input.attrs, &name_str);
+
+    let fields = match &input.data {
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(fields) => &fields.named,
+            _ => panic!("EntityView can only be derived for structs with named fields"),
+        },
+        _ => panic!("EntityView can only be derived for structs"),
+    };
+
+    let mut field_specs = Vec::new();
+
+    for field in fields {
+        let field_name = field.ident.as_ref().unwrap();
+        let field_name_str = field_name.to_string();
+        
+        let (attr_override, ref_attr, is_ref, is_backref, profiles, is_component) = parse_view_field_attributes(&field.attrs);
+        let (base_type, is_vec, nested_type) = extract_type_info(&field.ty);
+
+        // Determine attribute identifier
+        let attr_ident = if let Some(override_attr) = attr_override {
+            override_attr
+        } else if let Some(ref_attr_val) = ref_attr {
+            ref_attr_val
+        } else {
+            format!(":{}/{}", namespace, to_snake_case(&field_name_str))
+        };
+
+        // Determine field kind
+        let kind = if is_backref {
+            let nested = nested_type.as_deref().unwrap_or(&base_type);
+            quote! { mentat_entity::FieldKind::Backref { nested: #nested } }
+        } else if is_ref {
+            let nested = nested_type.as_deref().unwrap_or(&base_type);
+            quote! { mentat_entity::FieldKind::Ref { nested: #nested } }
+        } else {
+            quote! { mentat_entity::FieldKind::Scalar }
+        };
+
+        // Generate profiles array if specified
+        let profiles_expr = if let Some(profile_vec) = profiles {
+            let profile_strs: Vec<_> = profile_vec.iter().collect();
+            quote! { Some(&[#(#profile_strs),*]) }
+        } else {
+            quote! { None }
+        };
+
+        field_specs.push(quote! {
+            mentat_entity::FieldSpec {
+                rust_name: #field_name_str,
+                attr: #attr_ident,
+                kind: #kind,
+                cardinality_many: #is_vec,
+                profiles: #profiles_expr,
+                is_component: #is_component,
+            }
+        });
+    }
+
+    let expanded = quote! {
+        impl mentat_entity::EntityViewSpec for #name {
+            const NS: &'static str = #namespace;
+            const FIELDS: &'static [mentat_entity::FieldSpec] = &[
+                #(#field_specs),*
+            ];
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+fn parse_patch_field_attributes(attrs: &[Attribute]) -> (bool, Option<String>) {
+    let mut is_entity_id = false;
+    let mut attr_override = None;
+
+    for attr in attrs {
+        if attr.path.is_ident("entity_id") {
+            is_entity_id = true;
+        } else if attr.path.is_ident("attr") {
+            if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
+                for nested in &meta_list.nested {
+                    if let NestedMeta::Lit(Lit::Str(s)) = nested {
+                        attr_override = Some(s.value());
+                    }
+                }
+            }
+        }
+    }
+
+    (is_entity_id, attr_override)
+}
+
+fn extract_patch_type_info(ty: &Type) -> (bool, bool, String) {
+    match ty {
+        Type::Path(type_path) => {
+            let segment = type_path.path.segments.last().unwrap();
+            let type_name = segment.ident.to_string();
+
+            // Check for Patch<T>
+            if type_name == "Patch" {
+                if let PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
+                        if let Type::Path(inner_path) = inner_ty {
+                            let inner_segment = inner_path.path.segments.last().unwrap();
+                            let inner_name = inner_segment.ident.to_string();
+                            return (true, false, inner_name);
+                        }
+                    }
+                }
+            }
+
+            // Check for ManyPatch<T>
+            if type_name == "ManyPatch" {
+                if let PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
+                        if let Type::Path(inner_path) = inner_ty {
+                            let inner_segment = inner_path.path.segments.last().unwrap();
+                            let inner_name = inner_segment.ident.to_string();
+                            return (false, true, inner_name);
+                        }
+                    }
+                }
+            }
+
+            (false, false, type_name)
+        }
+        _ => panic!("Unsupported field type"),
+    }
+}
+
+/// Derive macro for EntityPatch
+///
+/// # Attributes
+///
+/// ## Container attributes:
+/// - `#[entity(ns="namespace")]` - Optional namespace (defaults to snake_case of struct name)
+///
+/// ## Field attributes:
+/// - `#[entity_id]` - Required: mark field as entity ID (must be of type EntityId)
+/// - `#[attr(":custom/ident")]` - Override attribute identifier
+///
+/// # Example
+///
+/// ```ignore
+/// #[derive(EntityPatch)]
+/// #[entity(ns="order")]
+/// struct OrderPatch {
+///     #[entity_id]
+///     id: EntityId,
+///     status: Patch<OrderStatus>,
+///     tags: ManyPatch<String>,
+/// }
+/// ```
+#[proc_macro_derive(EntityPatch, attributes(entity, attr, entity_id))]
+pub fn derive_entity_patch(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+    let name_str = name.to_string();
+    let namespace = extract_namespace_or_default(&input.attrs, &name_str);
+
+    let fields = match &input.data {
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(fields) => &fields.named,
+            _ => panic!("EntityPatch can only be derived for structs with named fields"),
+        },
+        _ => panic!("EntityPatch can only be derived for structs"),
+    };
+
+    // Find entity_id field
+    let mut entity_id_field = None;
+    let mut patch_fields = Vec::new();
+
+    for field in fields {
+        let field_name = field.ident.as_ref().unwrap();
+        let (is_entity_id, attr_override) = parse_patch_field_attributes(&field.attrs);
+
+        if is_entity_id {
+            entity_id_field = Some(field_name.clone());
+        } else {
+            let field_name_str = field_name.to_string();
+            let (is_patch, is_many_patch, inner_type) = extract_patch_type_info(&field.ty);
+
+            let attr_ident = if let Some(override_attr) = attr_override {
+                override_attr
+            } else {
+                format!(":{}/{}", namespace, to_snake_case(&field_name_str))
+            };
+
+            patch_fields.push((field_name.clone(), is_patch, is_many_patch, attr_ident, inner_type));
+        }
+    }
+
+    let entity_id_field = entity_id_field.expect("EntityPatch requires a field with #[entity_id] attribute");
+
+    // Generate to_tx() implementation
+    let mut tx_op_arms = Vec::new();
+
+    for (field_name, is_patch, is_many_patch, attr_ident, inner_type) in patch_fields {
+        if is_patch {
+            // Handle Patch<T>
+            let to_value = generate_value_conversion(&inner_type, quote! { v });
+            let to_value_expected = generate_value_conversion(&inner_type, quote! { expected });
+            let to_value_new = generate_value_conversion(&inner_type, quote! { new });
+            tx_op_arms.push(quote! {
+                match &self.#field_name {
+                    mentat_entity::Patch::NoChange => {},
+                    mentat_entity::Patch::Set(v) => {
+                        let value = #to_value;
+                        ops.push(mentat_entity::TxOp::Assert {
+                            e: self.#entity_id_field.clone(),
+                            a: #attr_ident,
+                            v: value,
+                        });
+                    },
+                    mentat_entity::Patch::Unset => {
+                        ops.push(mentat_entity::TxOp::RetractAttr {
+                            e: self.#entity_id_field.clone(),
+                            a: #attr_ident,
+                        });
+                    },
+                    mentat_entity::Patch::SetWithEnsure { expected, new } => {
+                        let expected_value = #to_value_expected;
+                        ops.push(mentat_entity::TxOp::Ensure {
+                            e: self.#entity_id_field.clone(),
+                            a: #attr_ident,
+                            v: expected_value,
+                        });
+                        let new_value = #to_value_new;
+                        ops.push(mentat_entity::TxOp::Assert {
+                            e: self.#entity_id_field.clone(),
+                            a: #attr_ident,
+                            v: new_value,
+                        });
+                    },
+                }
+            });
+        } else if is_many_patch {
+            // Handle ManyPatch<T>
+            let to_value = generate_value_conversion(&inner_type, quote! { v });
+            tx_op_arms.push(quote! {
+                if self.#field_name.clear {
+                    ops.push(mentat_entity::TxOp::RetractAttr {
+                        e: self.#entity_id_field.clone(),
+                        a: #attr_ident,
+                    });
+                }
+                for v in &self.#field_name.add {
+                    let value = #to_value;
+                    ops.push(mentat_entity::TxOp::Assert {
+                        e: self.#entity_id_field.clone(),
+                        a: #attr_ident,
+                        v: value,
+                    });
+                }
+                for v in &self.#field_name.remove {
+                    let value = #to_value;
+                    ops.push(mentat_entity::TxOp::Retract {
+                        e: self.#entity_id_field.clone(),
+                        a: #attr_ident,
+                        v: value,
+                    });
+                }
+            });
+        }
+    }
+
+    let expanded = quote! {
+        impl #name {
+            /// Convert this patch to a list of transaction operations
+            pub fn to_tx(&self) -> Vec<mentat_entity::TxOp> {
+                let mut ops = Vec::new();
+                #(#tx_op_arms)*
+                ops
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// Generate code to convert a value to TypedValue
+fn generate_value_conversion(
+    inner_type: &str,
+    value_expr: proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    match inner_type {
+        "String" => quote! { mentat_entity::core_traits::TypedValue::String(#value_expr.clone().into()) },
+        "i64" => quote! { mentat_entity::core_traits::TypedValue::Long(*#value_expr) },
+        "f64" => quote! { mentat_entity::core_traits::TypedValue::Double((*#value_expr).into()) },
+        "bool" => quote! { mentat_entity::core_traits::TypedValue::Boolean(*#value_expr) },
+        "Uuid" => quote! { mentat_entity::core_traits::TypedValue::Uuid(*#value_expr) },
+        "EntityId" => quote! {
+            match #value_expr {
+                mentat_entity::EntityId::Entid(id) => mentat_entity::core_traits::TypedValue::Ref(*id),
+                mentat_entity::EntityId::LookupRef { .. } => {
+                    // LookupRef needs to be resolved to Entid during transaction
+                    // For now, we'll need to handle this at transaction time
+                    panic!("LookupRef in EntityPatch requires transaction-time resolution")
+                },
+                mentat_entity::EntityId::Temp(tempid) => {
+                    // TempId will be resolved during transaction
+                    // Store as a special marker that needs resolution
+                    panic!("TempId in EntityPatch requires transaction-time resolution")
+                },
+            }
+        },
+        _ => {
+            // For custom types, assume they implement Into<TypedValue> or have a to_keyword method
+            quote! { (#value_expr).clone().into() }
+        }
+    }
+}

@@ -46,9 +46,8 @@ extern crate edn;
 extern crate mentat_db;
 extern crate uuid;
 
-#[macro_use]
 pub extern crate mentat_entity_derive;
-pub use mentat_entity_derive::Entity;
+pub use mentat_entity_derive::{Entity, EntityView, EntityPatch};
 
 pub use core_traits;
 pub use mentat_core;
@@ -74,6 +73,235 @@ use public_traits::errors::Result;
 pub enum MentatEntityError {
     #[error("Missing required field: {0}")]
     MissingRequiredField(String),
+    #[error("Backref cardinality violation: expected one, found multiple")]
+    BackrefCardinalityViolation,
+    #[error("Missing entity: {0}")]
+    MissingEntity(String),
+    #[error("Type mismatch: {0}")]
+    TypeMismatch(String),
+}
+
+// ============================================================================
+// EntityView/EntityPatch Types (from tech spec)
+// ============================================================================
+
+/// Universal entity identifier
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum EntityId {
+    /// Direct entity ID
+    Entid(i64),
+    /// Lookup reference: find entity by unique attribute
+    LookupRef {
+        attr: &'static str,
+        value: TypedValue,
+    },
+    /// Temporary ID for transaction (will be resolved to actual Entid)
+    Temp(i64),
+}
+
+impl From<i64> for EntityId {
+    fn from(id: i64) -> Self {
+        EntityId::Entid(id)
+    }
+}
+
+/// Transaction operation
+#[derive(Clone, Debug, PartialEq)]
+pub enum TxOp {
+    /// Assert a fact (add or update)
+    Assert {
+        e: EntityId,
+        a: &'static str,
+        v: TypedValue,
+    },
+    /// Retract a specific fact
+    Retract {
+        e: EntityId,
+        a: &'static str,
+        v: TypedValue,
+    },
+    /// Retract all values for an attribute
+    RetractAttr {
+        e: EntityId,
+        a: &'static str,
+    },
+    /// Ensure predicate (optimistic concurrency check)
+    Ensure {
+        e: EntityId,
+        a: &'static str,
+        v: TypedValue,
+    },
+}
+
+/// Patch for a single-valued (cardinality-one) field
+#[derive(Clone, Debug, PartialEq)]
+pub enum Patch<T> {
+    /// No change to this field
+    NoChange,
+    /// Set the field to a new value
+    Set(T),
+    /// Unset (retract) the field
+    Unset,
+    /// Set with ensure predicate (optimistic concurrency)
+    /// Ensures current value matches expected before setting new value
+    SetWithEnsure {
+        /// Expected current value
+        expected: T,
+        /// New value to set
+        new: T,
+    },
+}
+
+impl<T> Default for Patch<T> {
+    fn default() -> Self {
+        Patch::NoChange
+    }
+}
+
+/// Patch for a multi-valued (cardinality-many) field
+#[derive(Clone, Debug, PartialEq)]
+pub struct ManyPatch<T> {
+    /// Values to add
+    pub add: Vec<T>,
+    /// Values to remove
+    pub remove: Vec<T>,
+    /// Clear all existing values before adding
+    pub clear: bool,
+}
+
+impl<T> Default for ManyPatch<T> {
+    fn default() -> Self {
+        Self {
+            add: Vec::new(),
+            remove: Vec::new(),
+            clear: false,
+        }
+    }
+}
+
+impl<T> ManyPatch<T> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_add(mut self, values: Vec<T>) -> Self {
+        self.add = values;
+        self
+    }
+
+    pub fn with_remove(mut self, values: Vec<T>) -> Self {
+        self.remove = values;
+        self
+    }
+
+    pub fn with_clear(mut self, clear: bool) -> Self {
+        self.clear = clear;
+        self
+    }
+}
+
+/// Kind of field in an entity view
+#[derive(Clone, Debug, PartialEq)]
+pub enum FieldKind {
+    /// Scalar value (string, long, etc.)
+    Scalar,
+    /// Reference to another entity
+    Ref {
+        /// Type name of the nested view
+        nested: &'static str,
+    },
+    /// Reverse reference (backref)
+    Backref {
+        /// Type name of the nested view
+        nested: &'static str,
+    },
+}
+
+/// Specification for a field in an entity view
+#[derive(Clone, Debug)]
+pub struct FieldSpec {
+    /// Rust field name
+    pub rust_name: &'static str,
+    /// Attribute identifier (e.g., ":person/name" or forward ident for backref)
+    pub attr: &'static str,
+    /// Kind of field
+    pub kind: FieldKind,
+    /// Whether this field has many cardinality
+    pub cardinality_many: bool,
+    /// Optional profiles this field belongs to (None = all profiles)
+    pub profiles: Option<&'static [&'static str]>,
+    /// Whether this field is a component (for cascade operations)
+    pub is_component: bool,
+}
+
+/// Trait for entity view metadata
+pub trait EntityViewSpec {
+    /// Namespace for this entity type
+    const NS: &'static str;
+    /// Field specifications
+    const FIELDS: &'static [FieldSpec];
+    /// Available view profiles
+    const PROFILES: &'static [&'static str] = &[];
+    
+    /// Get fields for a specific profile
+    fn fields_for_profile(profile: &str) -> Vec<&'static FieldSpec> {
+        Self::FIELDS
+            .iter()
+            .filter(|f| {
+                f.profiles.map_or(true, |profiles| profiles.contains(&profile))
+            })
+            .collect()
+    }
+    
+    /// Generate EDN pull pattern for this view
+    /// 
+    /// # Arguments
+    /// * `depth` - Maximum depth for nested views (0 = scalars only, 1+ = include refs/backrefs)
+    /// * `profile` - Optional profile name to filter fields
+    fn pull_pattern(depth: usize, profile: Option<&str>) -> String {
+        Self::pull_pattern_impl(depth, profile, &mut std::collections::HashSet::new())
+    }
+    
+    /// Internal implementation with cycle detection
+    fn pull_pattern_impl(
+        depth: usize,
+        profile: Option<&str>,
+        visited: &mut std::collections::HashSet<&'static str>,
+    ) -> String {
+        // Prevent infinite recursion
+        let type_name = std::any::type_name::<Self>();
+        if visited.contains(&type_name) {
+            return "...".to_string();
+        }
+        visited.insert(type_name);
+        
+        let fields = if let Some(prof) = profile {
+            Self::fields_for_profile(prof)
+        } else {
+            Self::FIELDS.iter().collect()
+        };
+        
+        let mut attrs = vec!["*".to_string()]; // Start with :db/id
+        
+        for field in fields {
+            match &field.kind {
+                FieldKind::Scalar => {
+                    attrs.push(field.attr.to_string());
+                }
+                FieldKind::Ref { nested: _ } | FieldKind::Backref { nested: _ } => {
+                    if depth > 0 {
+                        // For refs/backrefs, we'd need to recursively call pull_pattern
+                        // on the nested type, but we can't do that statically without
+                        // trait bounds. For now, just include the attribute.
+                        attrs.push(field.attr.to_string());
+                    }
+                }
+            }
+        }
+        
+        visited.remove(&type_name);
+        format!("[{}]", attrs.join(" "))
+    }
 }
 
 /// Represents the type of an entity field in the schema
