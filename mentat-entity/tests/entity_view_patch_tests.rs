@@ -11,8 +11,7 @@
 //! Tests for EntityView and EntityPatch derive macros
 
 use mentat_entity::{
-    EntityId, EntityPatch, EntityView, EntityViewSpec, FieldKind, FieldSpec, ManyPatch, Patch,
-    TxOp,
+    EntityId, EntityPatch, EntityView, EntityViewSpec, FieldKind, FieldSpec, ManyPatch, Patch, TxOp,
 };
 
 // ============================================================================
@@ -38,6 +37,8 @@ struct CarView {
     #[fref(attr = ":car/owner")]
     owner: EntityId,
 }
+///
+/// (pull ?e [:db/id :person/name :car/_owner])
 
 #[test]
 fn test_person_view_spec() {
@@ -77,14 +78,18 @@ fn test_car_view_spec() {
     let owner_field = &CarView::FIELDS[2];
     assert_eq!(owner_field.rust_name, "owner");
     assert_eq!(owner_field.attr, ":car/owner");
-    
+
     // Debug output
     println!("owner_field.kind = {:?}", owner_field.kind);
-    
+
     // The nested type should be the base type name "EntityId"
     match &owner_field.kind {
         FieldKind::Ref { nested } => {
-            assert_eq!(*nested, "EntityId", "Expected nested type to be EntityId, got {}", nested);
+            assert_eq!(
+                *nested, "EntityId",
+                "Expected nested type to be EntityId, got {}",
+                nested
+            );
         }
         _ => panic!("Expected FieldKind::Ref, got {:?}", owner_field.kind),
     }
@@ -106,7 +111,7 @@ impl From<OrderStatus> for mentat_entity::core_traits::TypedValue {
     fn from(status: OrderStatus) -> Self {
         use mentat_entity::core_traits::TypedValue;
         use mentat_entity::mentat_core::Keyword;
-        
+
         let keyword = match status {
             OrderStatus::Pending => Keyword::namespaced("status", "pending"),
             OrderStatus::Paid => Keyword::namespaced("status", "paid"),
@@ -141,7 +146,7 @@ fn test_order_patch_to_tx() {
     };
 
     let ops = patch.to_tx();
-    
+
     // Should have 2 ops: one for status Set, one for tags add
     assert_eq!(ops.len(), 2);
 
@@ -175,7 +180,7 @@ fn test_order_patch_unset() {
     };
 
     let ops = patch.to_tx();
-    
+
     // Should have 1 op: RetractAttr for status
     assert_eq!(ops.len(), 1);
 
@@ -202,7 +207,7 @@ fn test_many_patch_clear() {
     };
 
     let ops = patch.to_tx();
-    
+
     // Should have 2 ops: RetractAttr for clear, then Assert for add
     assert_eq!(ops.len(), 2);
 
@@ -237,7 +242,7 @@ fn test_many_patch_remove() {
     };
 
     let ops = patch.to_tx();
-    
+
     // Should have 1 op: Retract for remove
     assert_eq!(ops.len(), 1);
 
@@ -266,7 +271,7 @@ struct ProductView {
 fn test_default_namespace() {
     // Should default to "product_view" (snake_case of "ProductView")
     assert_eq!(ProductView::NS, "product_view");
-    
+
     // product_name should be ":product_view/product_name"
     let name_field = &ProductView::FIELDS[1];
     assert_eq!(name_field.attr, ":product_view/product_name");
@@ -319,10 +324,13 @@ fn test_user_patch_default_attrs() {
     assert_eq!(ops.len(), 3);
 
     // Check that default namespace "user_patch" is used
-    let attrs: Vec<&str> = ops.iter().map(|op| match op {
-        TxOp::Assert { a, .. } => *a,
-        _ => panic!("Expected Assert"),
-    }).collect();
+    let attrs: Vec<&str> = ops
+        .iter()
+        .map(|op| match op {
+            TxOp::Assert { a, .. } => *a,
+            _ => panic!("Expected Assert"),
+        })
+        .collect();
 
     assert!(attrs.contains(&":user_patch/email"));
     assert!(attrs.contains(&":user_patch/age"));
@@ -346,7 +354,7 @@ fn test_patch_with_ensure() {
     };
 
     let ops = patch.to_tx();
-    
+
     // Should have 2 ops: Ensure then Assert
     assert_eq!(ops.len(), 2);
 
@@ -376,17 +384,17 @@ fn test_patch_with_ensure() {
 struct UserView {
     #[attr(":db/id")]
     id: i64,
-    
+
     // Always included
     name: String,
-    
+
     // Only in "full" profile
     #[profile("full")]
     email: String,
-    
+
     #[profile("full")]
     phone: Option<String>,
-    
+
     // Only in "summary" profile
     #[profile("summary")]
     display_name: String,
@@ -396,25 +404,25 @@ struct UserView {
 fn test_view_profiles() {
     // All fields should be present
     assert_eq!(UserView::FIELDS.len(), 5);
-    
+
     // Check that profile metadata is set
     let email_field = &UserView::FIELDS[2];
     assert_eq!(email_field.rust_name, "email");
     assert_eq!(email_field.profiles, Some(&["full"][..]));
-    
+
     let phone_field = &UserView::FIELDS[3];
     assert_eq!(phone_field.rust_name, "phone");
     assert_eq!(phone_field.profiles, Some(&["full"][..]));
-    
+
     let display_name_field = &UserView::FIELDS[4];
     assert_eq!(display_name_field.rust_name, "display_name");
     assert_eq!(display_name_field.profiles, Some(&["summary"][..]));
-    
+
     // Fields without profiles should have None
     let name_field = &UserView::FIELDS[1];
     assert_eq!(name_field.rust_name, "name");
     assert_eq!(name_field.profiles, None);
-    
+
     // Test profile filtering
     let full_fields = UserView::fields_for_profile("full");
     let full_names: Vec<_> = full_fields.iter().map(|f| f.rust_name).collect();
@@ -432,10 +440,10 @@ fn test_view_profiles() {
 fn test_pull_pattern_generation() {
     let pattern = PersonView::pull_pattern(0, None);
     println!("Generated pattern: {}", pattern);
-    
+
     // Should contain all scalar attributes
     assert!(pattern.contains(":person/name"));
-    
+
     // Test with depth > 0
     let pattern_depth1 = PersonView::pull_pattern(1, None);
     println!("Generated pattern with depth 1: {}", pattern_depth1);
@@ -450,9 +458,9 @@ fn test_pull_pattern_generation() {
 struct DocumentView {
     #[attr(":db/id")]
     id: i64,
-    
+
     title: String,
-    
+
     // Component reference - will be cascade-deleted
     #[fref(attr = ":document/metadata")]
     #[component]
@@ -464,7 +472,7 @@ struct DocumentView {
 struct MetadataView {
     #[attr(":db/id")]
     id: i64,
-    
+
     created_at: i64,
     author: String,
 }
@@ -474,7 +482,7 @@ fn test_component_attribute() {
     let metadata_field = &DocumentView::FIELDS[2];
     assert_eq!(metadata_field.rust_name, "metadata");
     assert!(metadata_field.is_component);
-    
+
     // Non-component fields should have is_component = false
     let title_field = &DocumentView::FIELDS[1];
     assert!(!title_field.is_component);

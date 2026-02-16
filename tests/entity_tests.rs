@@ -38,7 +38,7 @@ struct TestPerson {
     age: Option<i64>,
 }
 
-#[derive(EntityDerive)]
+#[derive(Debug, EntityDerive)]
 #[entity(namespace = "person")]
 struct TestPersonDerive {
     email: String,
@@ -393,6 +393,6 @@ fn test_derived_entity() {
     // dbg!(store.transact("[[:db/add \"s\" :person/name \"Dima\"]]"));
     dbg!(store.q_once("[:find ?v :where [_ :person/name ?v]]", None));
     let person =
-        TestPerson::read(&store.begin_transaction().expect("Begin transaction"), id).unwrap();
+        TestPersonDerive::read(&store.begin_transaction().expect("Begin transaction"), id).unwrap();
     assert_eq!(person.email, "email@gmail.com");
 }

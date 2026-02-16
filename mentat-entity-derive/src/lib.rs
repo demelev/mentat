@@ -104,7 +104,7 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
         if is_optional {
             let to_typed_value_inner = generate_to_typed_value(&field_type, quote! { val });
             to_values_fields.push(quote! {
-                if let Some(ref val) = self.#field_name {
+                if let Some(val) = self.#field_name {
                     values.insert(#keyword, #to_typed_value_inner);
                 }
             });
@@ -137,7 +137,7 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
         if is_optional {
             let to_typed_value_inner = generate_to_typed_value(&field_type, quote! { val });
             write_fields.push(quote! {
-                if let Some(ref val) = self.#field_name {
+                if let Some(val) = self.#field_name {
                     builder.add(entity.clone(), #keyword, #to_typed_value_inner)?;
                 }
             });
@@ -167,7 +167,7 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
 
             fn to_values(&self) -> std::collections::HashMap<Keyword, mentat_entity::core_traits::TypedValue> {
                 let mut values = std::collections::HashMap::new();
-                // #(#to_values_fields)*
+                #(#to_values_fields)*
                 values
             }
 
@@ -358,8 +358,8 @@ fn generate_to_typed_value(
         "String" => {
             quote! { mentat_entity::core_traits::TypedValue::String(#value_expr.clone().into()) }
         }
-        "i64" => quote! { mentat_entity::core_traits::TypedValue::Long(*#value_expr) },
-        "f64" => quote! { mentat_entity::core_traits::TypedValue::Double((*#value_expr).into()) },
+        "i64" => quote! { mentat_entity::core_traits::TypedValue::Long(#value_expr) },
+        "f64" => quote! { mentat_entity::core_traits::TypedValue::Double((#value_expr).into()) },
         "bool" => quote! { mentat_entity::core_traits::TypedValue::Boolean(#value_expr) },
         "DateTime" => quote! { mentat_entity::core_traits::TypedValue::Instant(#value_expr) },
         "Uuid" => quote! { mentat_entity::core_traits::TypedValue::Uuid(#value_expr) },
@@ -442,7 +442,7 @@ fn generate_from_typed_value(
 fn to_snake_case(s: &str) -> String {
     let mut result = String::new();
     let mut prev_was_uppercase = false;
-    
+
     for (i, ch) in s.chars().enumerate() {
         if ch.is_uppercase() {
             if i > 0 && !prev_was_uppercase {
@@ -455,7 +455,7 @@ fn to_snake_case(s: &str) -> String {
             prev_was_uppercase = false;
         }
     }
-    
+
     result
 }
 
@@ -483,7 +483,16 @@ fn extract_namespace_or_default(attrs: &[Attribute], struct_name: &str) -> Strin
     to_snake_case(struct_name)
 }
 
-fn parse_view_field_attributes(attrs: &[Attribute]) -> (Option<String>, Option<String>, bool, bool, Option<Vec<String>>, bool) {
+fn parse_view_field_attributes(
+    attrs: &[Attribute],
+) -> (
+    Option<String>,
+    Option<String>,
+    bool,
+    bool,
+    Option<Vec<String>>,
+    bool,
+) {
     let mut attr_override = None;
     let mut ref_attr = None;
     let mut is_ref = false;
@@ -494,7 +503,7 @@ fn parse_view_field_attributes(attrs: &[Attribute]) -> (Option<String>, Option<S
     for attr in attrs {
         // Get the attribute name as a string to handle both "ref" and "r#ref"
         let attr_name = attr.path.get_ident().map(|i| i.to_string());
-        
+
         if attr.path.is_ident("attr") {
             if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
                 for nested in &meta_list.nested {
@@ -517,7 +526,10 @@ fn parse_view_field_attributes(attrs: &[Attribute]) -> (Option<String>, Option<S
                     profiles = Some(profile_list);
                 }
             }
-        } else if attr_name.as_deref() == Some("ref") || attr.path.is_ident("ref") || attr.path.is_ident("fref") {
+        } else if attr_name.as_deref() == Some("ref")
+            || attr.path.is_ident("ref")
+            || attr.path.is_ident("fref")
+        {
             is_ref = true;
             if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
                 for nested in &meta_list.nested {
@@ -552,7 +564,14 @@ fn parse_view_field_attributes(attrs: &[Attribute]) -> (Option<String>, Option<S
         }
     }
 
-    (attr_override, ref_attr, is_ref, is_backref, profiles, is_component)
+    (
+        attr_override,
+        ref_attr,
+        is_ref,
+        is_backref,
+        profiles,
+        is_component,
+    )
 }
 
 fn extract_type_info(ty: &Type) -> (String, bool, Option<String>) {
@@ -616,7 +635,10 @@ fn extract_type_info(ty: &Type) -> (String, bool, Option<String>) {
 ///     car: Option<CarView>,
 /// }
 /// ```
-#[proc_macro_derive(EntityView, attributes(entity, attr, r#ref, fref, backref, entity_id, profile, component))]
+#[proc_macro_derive(
+    EntityView,
+    attributes(entity, attr, r#ref, fref, backref, entity_id, profile, component)
+)]
 pub fn derive_entity_view(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
@@ -636,8 +658,9 @@ pub fn derive_entity_view(input: TokenStream) -> TokenStream {
     for field in fields {
         let field_name = field.ident.as_ref().unwrap();
         let field_name_str = field_name.to_string();
-        
-        let (attr_override, ref_attr, is_ref, is_backref, profiles, is_component) = parse_view_field_attributes(&field.attrs);
+
+        let (attr_override, ref_attr, is_ref, is_backref, profiles, is_component) =
+            parse_view_field_attributes(&field.attrs);
         let (base_type, is_vec, nested_type) = extract_type_info(&field.ty);
 
         // Determine attribute identifier
@@ -809,11 +832,18 @@ pub fn derive_entity_patch(input: TokenStream) -> TokenStream {
                 format!(":{}/{}", namespace, to_snake_case(&field_name_str))
             };
 
-            patch_fields.push((field_name.clone(), is_patch, is_many_patch, attr_ident, inner_type));
+            patch_fields.push((
+                field_name.clone(),
+                is_patch,
+                is_many_patch,
+                attr_ident,
+                inner_type,
+            ));
         }
     }
 
-    let entity_id_field = entity_id_field.expect("EntityPatch requires a field with #[entity_id] attribute");
+    let entity_id_field =
+        entity_id_field.expect("EntityPatch requires a field with #[entity_id] attribute");
 
     // Generate to_tx() implementation
     let mut tx_op_arms = Vec::new();
@@ -907,10 +937,12 @@ fn generate_value_conversion(
     value_expr: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     match inner_type {
-        "String" => quote! { mentat_entity::core_traits::TypedValue::String(#value_expr.clone().into()) },
-        "i64" => quote! { mentat_entity::core_traits::TypedValue::Long(*#value_expr) },
-        "f64" => quote! { mentat_entity::core_traits::TypedValue::Double((*#value_expr).into()) },
-        "bool" => quote! { mentat_entity::core_traits::TypedValue::Boolean(*#value_expr) },
+        "String" => {
+            quote! { mentat_entity::core_traits::TypedValue::String(#value_expr.clone().into()) }
+        }
+        "i64" => quote! { mentat_entity::core_traits::TypedValue::Long(#value_expr) },
+        "f64" => quote! { mentat_entity::core_traits::TypedValue::Double((#value_expr).into()) },
+        "bool" => quote! { mentat_entity::core_traits::TypedValue::Boolean(#value_expr) },
         "Uuid" => quote! { mentat_entity::core_traits::TypedValue::Uuid(*#value_expr) },
         "EntityId" => quote! {
             match #value_expr {

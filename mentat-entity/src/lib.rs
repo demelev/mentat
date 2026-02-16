@@ -40,34 +40,23 @@
 //! // store.ensure_entity_schema::<Person>()?;
 //! ```
 
-extern crate chrono;
-extern crate db_traits;
-extern crate edn;
-extern crate mentat_db;
-extern crate uuid;
+mod read;
 
 pub extern crate mentat_entity_derive;
-pub use mentat_entity_derive::{Entity, EntityView, EntityPatch};
-
 pub use core_traits;
+use core_traits::{Entid, TypedValue, ValueType};
 pub use mentat_core;
+use mentat_core::{Keyword, TxReport};
+pub use mentat_entity_derive::{Entity, EntityPatch, EntityView};
 pub use mentat_transaction;
+use mentat_transaction::InProgress;
 pub use public_traits;
 pub use public_traits::errors::MentatError;
+use public_traits::errors::Result;
 pub use read::{find_entity_by_unique, read_entity_attributes};
 
-mod read;
-use thiserror::Error;
-
 use std::collections::HashMap;
-
-use core_traits::{Entid, TypedValue, ValueType};
-
-use mentat_core::{Keyword, TxReport};
-
-use mentat_transaction::InProgress;
-
-use public_traits::errors::Result;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum MentatEntityError {
@@ -121,10 +110,7 @@ pub enum TxOp {
         v: TypedValue,
     },
     /// Retract all values for an attribute
-    RetractAttr {
-        e: EntityId,
-        a: &'static str,
-    },
+    RetractAttr { e: EntityId, a: &'static str },
     /// Ensure predicate (optimistic concurrency check)
     Ensure {
         e: EntityId,
@@ -242,26 +228,27 @@ pub trait EntityViewSpec {
     const FIELDS: &'static [FieldSpec];
     /// Available view profiles
     const PROFILES: &'static [&'static str] = &[];
-    
+
     /// Get fields for a specific profile
     fn fields_for_profile(profile: &str) -> Vec<&'static FieldSpec> {
         Self::FIELDS
             .iter()
             .filter(|f| {
-                f.profiles.map_or(true, |profiles| profiles.contains(&profile))
+                f.profiles
+                    .map_or(true, |profiles| profiles.contains(&profile))
             })
             .collect()
     }
-    
+
     /// Generate EDN pull pattern for this view
-    /// 
+    ///
     /// # Arguments
     /// * `depth` - Maximum depth for nested views (0 = scalars only, 1+ = include refs/backrefs)
     /// * `profile` - Optional profile name to filter fields
     fn pull_pattern(depth: usize, profile: Option<&str>) -> String {
         Self::pull_pattern_impl(depth, profile, &mut std::collections::HashSet::new())
     }
-    
+
     /// Internal implementation with cycle detection
     fn pull_pattern_impl(
         depth: usize,
@@ -274,15 +261,15 @@ pub trait EntityViewSpec {
             return "...".to_string();
         }
         visited.insert(type_name);
-        
+
         let fields = if let Some(prof) = profile {
             Self::fields_for_profile(prof)
         } else {
             Self::FIELDS.iter().collect()
         };
-        
+
         let mut attrs = vec!["*".to_string()]; // Start with :db/id
-        
+
         for field in fields {
             match &field.kind {
                 FieldKind::Scalar => {
@@ -298,7 +285,7 @@ pub trait EntityViewSpec {
                 }
             }
         }
-        
+
         visited.remove(&type_name);
         format!("[{}]", attrs.join(" "))
     }
