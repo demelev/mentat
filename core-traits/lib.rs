@@ -23,7 +23,7 @@ use std::fmt::{self, Display};
 
 use std::ffi::CString;
 
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 use std::os::raw::c_char;
 
@@ -822,6 +822,11 @@ impl Deref for StructuredMap {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+impl DerefMut for StructuredMap {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
