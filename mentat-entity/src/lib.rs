@@ -44,18 +44,17 @@ mod read;
 
 pub extern crate mentat_entity_derive;
 pub use core_traits;
-use core_traits::{Entid, TypedValue, ValueType};
+use core_traits::{Entid, StructuredMap, TypedValue, ValueType};
 pub use mentat_core;
 use mentat_core::{Keyword, TxReport};
 pub use mentat_entity_derive::{Entity, EntityPatch, EntityView};
 pub use mentat_transaction;
-use mentat_transaction::InProgress;
+use mentat_transaction::{InProgress, InProgressRead};
 pub use public_traits;
 pub use public_traits::errors::MentatError;
 use public_traits::errors::Result;
 pub use read::{find_entity_by_unique, read_entity_attributes};
 
-use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -68,6 +67,8 @@ pub enum MentatEntityError {
     MissingEntity(String),
     #[error("Type mismatch: {0}")]
     TypeMismatch(String),
+    #[error("Missing attribute: {0}")]
+    MissingAttributeInDatabase(&'static Keyword),
 }
 
 // ============================================================================
@@ -273,7 +274,7 @@ pub trait EntityViewSpec {
         for field in fields {
             match &field.kind {
                 FieldKind::Scalar => {
-                    attrs.push(field.attr.to_string());
+                    attrs.push(field.attr.replace("#", "").to_string());
                 }
                 FieldKind::Ref { nested: _ } | FieldKind::Backref { nested: _ } => {
                     if depth > 0 {
@@ -417,10 +418,10 @@ pub trait Entity: Sized {
     fn namespace() -> &'static str;
 
     /// Convert this entity to a map of attribute keywords to typed values
-    fn to_values(&self) -> HashMap<Keyword, TypedValue>;
+    fn to_values(&self) -> StructuredMap;
 
     /// Create an entity instance from a map of typed values
-    fn from_values(values: HashMap<Keyword, TypedValue>) -> Result<Self>;
+    fn from_values(values: StructuredMap) -> Result<Self>;
 }
 
 /// Trait for writing entities to the database
@@ -440,11 +441,11 @@ pub trait EntityWrite: Entity {
 /// Trait for reading entities from the database
 pub trait EntityRead: Entity {
     /// Read an entity by its entid
-    fn read<'a, 'c>(in_progress: &InProgress<'a, 'c>, entid: Entid) -> Result<Self>;
+    fn read<'a, 'c>(in_progress: &mut InProgressRead<'a, 'c>, entid: Entid) -> Result<Self>;
 
     /// Read an entity by a unique attribute value
     fn read_by_unique<'a, 'c>(
-        in_progress: &InProgress<'a, 'c>,
+        in_progress: &mut InProgressRead<'a, 'c>,
         attribute: &Keyword,
         value: TypedValue,
     ) -> Result<Self>;

@@ -10,6 +10,8 @@
 
 //! Tests for EntityView and EntityPatch derive macros
 
+use std::sync::Arc;
+
 use mentat_entity::{
     EntityId, EntityPatch, EntityView, EntityViewSpec, FieldKind, FieldSpec, ManyPatch, Patch, TxOp,
 };
@@ -152,7 +154,7 @@ fn test_order_patch_to_tx() {
 
     // Check status op
     match &ops[0] {
-        TxOp::Assert { e, a, v } => {
+        TxOp::Assert { e, a, v: _ } => {
             assert_eq!(e, &EntityId::Entid(100));
             assert_eq!(*a, ":order/status");
             // Value check would require more setup
@@ -162,7 +164,7 @@ fn test_order_patch_to_tx() {
 
     // Check tags op
     match &ops[1] {
-        TxOp::Assert { e, a, v } => {
+        TxOp::Assert { e, a, v: _ } => {
             assert_eq!(e, &EntityId::Entid(100));
             assert_eq!(*a, ":order/tags");
         }

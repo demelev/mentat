@@ -85,11 +85,39 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
 
         let indexed = field_attrs.indexed;
 
+        let (attr_override, ref_attr, is_ref, is_backref, profiles, is_component) =
+            parse_view_field_attributes(&field.attrs);
+        let (base_type, is_vec, nested_type) = extract_type_info(&field.ty);
+
+        // Determine attribute identifier
+        let attr = if let Some(override_attr) = attr_override {
+            override_attr
+        } else if let Some(ref_attr_val) = ref_attr {
+            ref_attr_val
+        } else {
+            format!(":{}/{}", &namespace, &field_name_str)
+        };
+
+        fn into_keyword(attr: &str) -> proc_macro2::TokenStream {
+            let mut iter = attr.splitn(2, '/');
+            let pair = (iter.next(), iter.next());
+            match pair {
+                (Some(name), None) => quote! {Keyword::plain(#name)},
+                (Some(ns), Some(name)) => {
+                    let ns = ns.split_once(':').expect("Attribute starts with ':'").1;
+                    quote! {Keyword::namespaced(#ns, #name)}
+                }
+                (None, _) => unreachable!(),
+            }
+        }
+
+        let keyword = into_keyword(&attr); //quote! { Keyword::namespaced(#namespace, #field_name_str) };
+        //
         // Field definition
         field_defs.push(quote! {
             mentat_entity::FieldDefinition {
                 name: #field_name_str.to_string(),
-                ident: Keyword::namespaced(#namespace, #field_name_str),
+                ident: #keyword,
                 field_type: #field_type_enum,
                 cardinality: #cardinality,
                 unique: #unique_variant,
@@ -99,8 +127,6 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
         });
 
         // to_values implementation
-        let keyword = quote! { Keyword::namespaced(#namespace, #field_name_str) };
-
         if is_optional {
             let to_typed_value_inner = generate_to_typed_value(&field_type, quote! { val });
             to_values_fields.push(quote! {
@@ -116,19 +142,19 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
         }
 
         // from_values implementation
-        let from_typed_value = generate_from_typed_value(&field_type, quote! { value });
+        let from_typed_value_result = generate_from_typed_value(&field_type, quote! { value });
 
         if is_optional {
             from_values_fields.push(quote! {
-                #field_name: values.remove(&#keyword).map(|value| #from_typed_value).transpose()
-                    .map_err(|e| mentat::MentatError::EntityError(e.to_string()))?
+                #field_name: values.remove(&#keyword).and_then(|v| v.into_scalar())
+                    .map(|value| #from_typed_value_result).transpose()?
             });
         } else {
             from_values_fields.push(quote! {
                 #field_name: {
-                    let value = values.remove(&#keyword)
+                    let value = values.remove(&#keyword).and_then(|v| v.into_scalar())
                         .ok_or_else(|| mentat::MentatError::EntityError(format!("Missing required field: {}", #field_name_str)))?;
-                    #from_typed_value?
+                    #from_typed_value_result?
                 }
             });
         }
@@ -165,13 +191,13 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
                 #namespace
             }
 
-            fn to_values(&self) -> std::collections::HashMap<Keyword, mentat_entity::core_traits::TypedValue> {
-                let mut values = std::collections::HashMap::new();
-                #(#to_values_fields)*
+            fn to_values(&self) -> mentat_entity::core_traits::StructuredMap {
+                let mut values = mentat_entity::core_traits::StructuredMap::default();
+                // #(#to_values_fields)*
                 values
             }
 
-            fn from_values(mut values: std::collections::HashMap<Keyword, mentat_entity::core_traits::TypedValue>)
+            fn from_values(mut values: mentat_entity::core_traits::StructuredMap)
                 -> mentat_entity::public_traits::errors::Result<Self>
             {
                 Ok(#name {
@@ -184,42 +210,45 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
             fn write<'a, 'c>(&self, in_progress: &mut mentat_entity::mentat_transaction::InProgress<'a, 'c>)
                 -> mentat_entity::public_traits::errors::Result<mentat_entity::core_traits::Entid>
             {
-                use mentat_entity::mentat_transaction::entity_builder::{BuildTerms, TermBuilder};
-
-                let mut builder = TermBuilder::new();
-                let entity = builder.named_tempid("e");
-
-                #(#write_fields)*
-
-                let (terms, tempids) = builder.build()?;
-                let report = in_progress.transact_entities(terms)?;
-
-                // Get the entid for our temp entity
-                let entid = report.tempids.get("e")
-                    .ok_or_else(|| mentat::MentatError::EntityError("Failed to get entity ID from transaction".to_string()))?;
-
-                Ok(*entid)
+                todo!()
+                // use mentat_entity::mentat_transaction::entity_builder::{BuildTerms, TermBuilder};
+                //
+                // let mut builder = TermBuilder::new();
+                // let entity = builder.named_tempid("e");
+                //
+                // #(#write_fields)*
+                //
+                // let (terms, tempids) = builder.build()?;
+                // let report = in_progress.transact_entities(terms)?;
+                //
+                // // Get the entid for our temp entity
+                // let entid = report.tempids.get("e")
+                //     .ok_or_else(|| mentat::MentatError::EntityError("Failed to get entity ID from transaction".to_string()))?;
+                //
+                // Ok(*entid)
             }
 
             fn write_with_entid<'a, 'c>(&self, in_progress: &mut mentat_entity::mentat_transaction::InProgress<'a, 'c>, entid: mentat_entity::core_traits::Entid)
                 -> mentat_entity::public_traits::errors::Result<mentat_entity::core_traits::Entid>
             {
-                use mentat_entity::mentat_transaction::entity_builder::{BuildTerms, TermBuilder};
-
-                let mut builder = TermBuilder::new();
-                let entity = entid;
-
-                #(#write_fields)*
-
-                let (terms, tempids) = builder.build()?;
-                in_progress.transact_entities(terms)?;
-
-                Ok(entid)
+                todo!()
+                 //
+                // use mentat_entity::mentat_transaction::entity_builder::{BuildTerms, TermBuilder};
+                //
+                // let mut builder = TermBuilder::new();
+                // let entity = entid;
+                //
+                // #(#write_fields)*
+                //
+                // let (terms, tempids) = builder.build()?;
+                // in_progress.transact_entities(terms)?;
+                //
+                // Ok(entid)
              }
          }
 
          impl mentat_entity::EntityRead for #name {
-             fn read<'a, 'c>(in_progress: &mentat_entity::mentat_transaction::InProgress<'a, 'c>, entid: mentat_entity::core_traits::Entid)
+             fn read<'a, 'c>(in_progress: &mut mentat_entity::mentat_transaction::InProgressRead<'a, 'c>, entid: mentat_entity::core_traits::Entid)
                  -> mentat_entity::public_traits::errors::Result<Self>
              {
                  // Get the schema and read all attributes
@@ -231,16 +260,17 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
              }
 
              fn read_by_unique<'a, 'c>(
-                 in_progress: &mentat_entity::mentat_transaction::InProgress<'a, 'c>,
+                 in_progress: &mut mentat_entity::mentat_transaction::InProgressRead<'a, 'c>,
                  attribute: &Keyword,
                  value: mentat_entity::core_traits::TypedValue,
              ) -> mentat_entity::public_traits::errors::Result<Self> {
                  // Find entity by unique attribute
-                 let entid = mentat_entity::find_entity_by_unique(in_progress, attribute, value)?
-                     .ok_or_else(|| mentat::MentatError::EntityError("Entity not found".to_string()))?;
-
-                 // Read the entity
-                 Self::read(in_progress, entid)
+                 // let entid = mentat_entity::find_entity_by_unique(in_progress, attribute, value)?
+                 //     .ok_or_else(|| mentat::MentatError::EntityError("Entity not found".to_string()))?;
+                 //
+                 // // Read the entity
+                 // Self::read(in_progress, entid)
+                todo!()
              }
          }
     };
@@ -259,7 +289,7 @@ fn extract_namespace(attrs: &[Attribute]) -> String {
                         ..
                     })) = nested
                     {
-                        if path.is_ident("namespace") {
+                        if path.is_ident("ns") {
                             return s.value();
                         }
                     }
@@ -274,6 +304,7 @@ struct FieldAttributes {
     unique: Option<String>,
     indexed: bool,
     many: bool,
+    attr: Option<String>,
 }
 
 fn parse_field_attributes(attrs: &[Attribute]) -> FieldAttributes {
@@ -281,6 +312,7 @@ fn parse_field_attributes(attrs: &[Attribute]) -> FieldAttributes {
         unique: None,
         indexed: false,
         many: false,
+        attr: None,
     };
 
     for attr in attrs {
@@ -309,6 +341,7 @@ fn parse_field_attributes(attrs: &[Attribute]) -> FieldAttributes {
                 }
             }
         }
+        if attr.path.is_ident("attr") {}
     }
 
     result
@@ -346,6 +379,7 @@ fn rust_type_to_field_type(rust_type: &str) -> proc_macro2::TokenStream {
         "Uuid" => quote! { mentat_entity::FieldType::Uuid },
         "Keyword" => quote! { mentat_entity::FieldType::Keyword },
         "Entid" => quote! { mentat_entity::FieldType::Ref },
+        "EntityRef" => quote! { mentat_entity::FieldType::Ref },
         _ => panic!("Unsupported Rust type for Entity field: {}", rust_type),
     }
 }
@@ -365,6 +399,7 @@ fn generate_to_typed_value(
         "Uuid" => quote! { mentat_entity::core_traits::TypedValue::Uuid(#value_expr) },
         "Keyword" => quote! { mentat_entity::core_traits::TypedValue::Keyword(#value_expr.into()) },
         "Entid" => quote! { mentat_entity::core_traits::TypedValue::Ref(#value_expr) },
+        "EntityRef" => quote! { mentat_entity::core_traits::TypedValue::Ref(#value_expr) },
         _ => panic!("Unsupported type conversion: {}", field_type),
     }
 }
@@ -426,6 +461,13 @@ fn generate_from_typed_value(
         "Entid" => quote! {
             if let mentat_entity::core_traits::TypedValue::Ref(e) = #value_expr {
                 Ok(e)
+            } else {
+                Err(mentat::MentatError::EntityError("Expected Ref value".to_string()))
+            }
+        },
+        "EntityRef" => quote! {
+            if let mentat_entity::core_traits::TypedValue::Ref(e) = #value_expr {
+                Ok(EntityRef(edn::entities::EntidOrIdent::Endit(e)))
             } else {
                 Err(mentat::MentatError::EntityError("Expected Ref value".to_string()))
             }
@@ -938,15 +980,15 @@ fn generate_value_conversion(
 ) -> proc_macro2::TokenStream {
     match inner_type {
         "String" => {
-            quote! { mentat_entity::core_traits::TypedValue::String(#value_expr.clone().into()) }
+            quote! { mentat_entity::core_traits::TypedValue::String(std::sync::Arc::new(#value_expr.to_string())) }
         }
         "i64" => quote! { mentat_entity::core_traits::TypedValue::Long(#value_expr) },
-        "f64" => quote! { mentat_entity::core_traits::TypedValue::Double((#value_expr).into()) },
+        "f64" => quote! { mentat_entity::core_traits::TypedValue::Double((#value_expr)) },
         "bool" => quote! { mentat_entity::core_traits::TypedValue::Boolean(#value_expr) },
         "Uuid" => quote! { mentat_entity::core_traits::TypedValue::Uuid(*#value_expr) },
         "EntityId" => quote! {
             match #value_expr {
-                mentat_entity::EntityId::Entid(id) => mentat_entity::core_traits::TypedValue::Ref(*id),
+                mentat_entity::EntityId::Entid(id) => mentat_entity::core_traits::TypedValue::Ref(id),
                 mentat_entity::EntityId::LookupRef { .. } => {
                     // LookupRef needs to be resolved to Entid during transaction
                     // For now, we'll need to handle this at transaction time

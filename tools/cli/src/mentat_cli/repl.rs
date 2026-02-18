@@ -350,15 +350,6 @@ impl Repl {
             Command::Transact(transaction) => {
                 self.execute_transact(transaction);
             }
-            Command::Test() => {
-                let mut inprogress = self.store.begin_transaction().expect("Transaction");
-                let person = Person {
-                    name: "Alice".to_string(),
-                    age: 20,
-                    age2: 20.0,
-                };
-                person.write(&mut inprogress);
-            }
         }
 
         let end = end.unwrap_or_else(PreciseTime::now);

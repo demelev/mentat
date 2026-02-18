@@ -129,7 +129,9 @@ pub use query_builder::QueryBuilder;
 
 pub use conn::Conn;
 
-pub use mentat_transaction::{CacheAction, CacheDirection, InProgress, Pullable, Queryable};
+pub use mentat_transaction::{
+    CacheAction, CacheDirection, InProgress, InProgressRead, Pullable, Queryable,
+};
 
 pub use store::Store;
 

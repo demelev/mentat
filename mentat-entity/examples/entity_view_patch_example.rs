@@ -96,11 +96,10 @@ struct OrderPatch {
     /// Update customer reference
     #[attr(":order/customer")]
     customer: Patch<EntityId>,
-
-    /// Modify tags (multi-valued attribute)
-    /// - add: values to add
-    /// - remove: values to remove
-    /// - clear: if true, remove all existing values first
+    // Modify tags (multi-valued attribute)
+    // - add: values to add
+    // - remove: values to remove
+    // - clear: if true, remove all existing values first
     tags: ManyPatch<String>,
 }
 
@@ -195,7 +194,7 @@ fn main() {
     }
 
     println!("\n=== Future Enhancements Demo ===\n");
-    
+
     // 1. Optimistic concurrency with Ensure
     println!("1. Optimistic Concurrency (Ensure/CAS):");
     let concurrent_patch = OrderPatch {
@@ -207,12 +206,15 @@ fn main() {
         customer: Patch::NoChange,
         tags: ManyPatch::new(),
     };
-    
+
     let ops_ensure = concurrent_patch.to_tx();
-    println!("   Generated {} ops with Ensure predicate", ops_ensure.len());
+    println!(
+        "   Generated {} ops with Ensure predicate",
+        ops_ensure.len()
+    );
     println!("   First op: Ensure (checks current value)");
     println!("   Second op: Assert (sets new value)");
-    
+
     // 2. View profiles
     println!("\n2. View Profiles:");
     println!("   All UserView fields: {}", UserView::FIELDS.len());
@@ -220,17 +222,20 @@ fn main() {
     println!("   'full' profile fields: {}", full_profile.len());
     let summary_profile = UserView::fields_for_profile("summary");
     println!("   'summary' profile fields: {}", summary_profile.len());
-    
+
     // 3. EDN pull pattern
     println!("\n3. EDN Pull Pattern Generation:");
     let pattern = ProductView::pull_pattern(0, None);
     println!("   Pattern: {}", pattern);
-    
+
     // 4. Component cascades
     println!("\n4. Component Attributes:");
     for field in DocumentView::FIELDS {
         if field.is_component {
-            println!("   Component field: {} (will cascade on delete)", field.rust_name);
+            println!(
+                "   Component field: {} (will cascade on delete)",
+                field.rust_name
+            );
         }
     }
 
